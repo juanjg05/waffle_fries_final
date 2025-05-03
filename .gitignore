@@ -1,0 +1,69 @@
+# Python virtual environments
+venv/
+env/
+ENV/
+.env/
+.venv/
+env.bak/
+venv.bak/
+
+
+fri_autonomous_template/
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+coverage.xml
+*.cover
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IDE settings
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment variables
+.env
+.env.local
+
+# Logs
+*.log
+
+# Local development settings
+local_settings.py
+
+# Database
+*.db
+*.sqlite3
+
+# Audio files
+*.wav
+*.mp3
+*.ogg
+
+# Model files
+*.pt
+*.pth
+*.onnx
+*.h5
+*.hdf5
+
+# Data directories
+data/audio/
+data/models/
+data/speakers.json 
