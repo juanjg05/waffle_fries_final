@@ -33,8 +33,17 @@ def generate_launch_description():
         output='screen'
     )
     
+    # Launch the movement controller node
+    movement_node = Node(
+        package='robot_audio_processor',
+        executable='movement_controller_node.py',
+        name='movement_controller_node',
+        output='screen'
+    )
+    
     return LaunchDescription([
         kinect_launch,
         audio_node,
-        face_node
+        face_node,
+        movement_node
     ]) 
