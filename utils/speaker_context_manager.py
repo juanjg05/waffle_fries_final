@@ -7,6 +7,7 @@ from dataclasses import dataclass, asdict
 from collections import defaultdict, deque
 import sqlite3
 import pickle
+import traceback
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -21,12 +22,13 @@ class SpeakerContext:
     average_confidence: float = 0.0
     conversation_history: deque = None
     embedding_index: Optional[int] = None  # Index in the embedding space
+    embedding: Optional[List[float]] = None  # Store the actual embedding
     
     def __post_init__(self):
         if self.common_intents is None:
             self.common_intents = defaultdict(int)
         if self.conversation_history is None:
-            self.conversation_history = deque(maxlen=10)
+            self.conversation_history = deque(maxlen=100)  # Increased to 100
     
     def to_dict(self) -> Dict:
         """Convert to dictionary for storage"""
@@ -37,7 +39,8 @@ class SpeakerContext:
             'common_intents': dict(self.common_intents),
             'average_confidence': self.average_confidence,
             'conversation_history': list(self.conversation_history),
-            'embedding_index': self.embedding_index
+            'embedding_index': self.embedding_index,
+            'embedding': self.embedding
         }
     
     @classmethod
@@ -54,9 +57,10 @@ class SpeakerContext:
         context.average_confidence = data['average_confidence']
         context.conversation_history = deque(
             data['conversation_history'],
-            maxlen=10
+            maxlen=100
         )
         context.embedding_index = data.get('embedding_index')
+        context.embedding = data.get('embedding')
         return context
 
 class SpeakerContextManager:
@@ -84,6 +88,10 @@ class SpeakerContextManager:
     def _init_db(self):
         """Initialize SQLite database"""
         with sqlite3.connect(self.db_path) as conn:
+            # Drop existing table if it exists
+            conn.execute('DROP TABLE IF EXISTS speaker_contexts')
+            
+            # Create new table with updated schema
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS speaker_contexts (
                     speaker_id TEXT PRIMARY KEY,
@@ -92,7 +100,9 @@ class SpeakerContextManager:
                     common_intents TEXT,
                     average_confidence REAL,
                     conversation_history TEXT,
-                    embedding_index INTEGER
+                    embedding_index INTEGER,
+                    embedding TEXT,
+                    conversation_index INTEGER DEFAULT 1
                 )
             ''')
     
@@ -123,8 +133,9 @@ class SpeakerContextManager:
                         last_interaction_time=datetime.fromisoformat(row[2]) if row[2] else None,
                         common_intents=defaultdict(int, json.loads(row[3])),
                         average_confidence=row[4],
-                        conversation_history=deque(json.loads(row[5]), maxlen=10),
-                        embedding_index=row[6]
+                        conversation_history=deque(json.loads(row[5]), maxlen=100),
+                        embedding_index=row[6],
+                        embedding=json.loads(row[7]) if row[7] else None
                     )
                 else:
                     # Create new context
@@ -139,35 +150,42 @@ class SpeakerContextManager:
         
         return self.contexts[speaker_id]
     
-    def update_context(self, speaker_id: str, intent: str, confidence: float, transcript: str):
-        """
-        Update speaker context with new interaction.
-        
-        Args:
-            speaker_id: Speaker ID
-            intent: Detected intent
-            confidence: Confidence score
-            transcript: Speech transcript
-        """
-        context = self.get_context(speaker_id)
-        
-        # Update context
-        context.interaction_count += 1
-        context.last_interaction_time = datetime.now()
-        context.common_intents[intent] += 1
-        context.average_confidence = (
-            (context.average_confidence * (context.interaction_count - 1) + confidence)
-            / context.interaction_count
-        )
-        context.conversation_history.append({
-            'timestamp': context.last_interaction_time.isoformat(),
-            'intent': intent,
-            'confidence': confidence,
-            'transcript': transcript
-        })
-        
-        # Save to database
-        self._save_context(context)
+    def update_context(self, speaker_id: str, start_time: float, end_time: float, confidence: float, transcript: str = "", embedding: Optional[List[float]] = None, conversation_index: int = 1):
+        """Update speaker context with new interaction"""
+        try:
+            # Get existing context or create new one
+            context = self.get_context(speaker_id)
+            
+            # Update context
+            context.interaction_count += 1
+            context.last_interaction_time = datetime.now()
+            context.average_confidence = (
+                (context.average_confidence * (context.interaction_count - 1) + confidence) /
+                context.interaction_count
+            )
+            
+            # Update embedding if provided
+            if embedding is not None:
+                context.embedding = embedding
+                logger.info(f"Updated embedding for speaker {speaker_id}")
+            
+            # Add to conversation history
+            context.conversation_history.append({
+                'conversation_index': conversation_index,
+                'timestamp': context.last_interaction_time.isoformat(),
+                'start_time': start_time,
+                'end_time': end_time,
+                'confidence': confidence,
+                'transcript': transcript
+            })
+            
+            # Save to database
+            self._save_context(context)
+            logger.info(f"Updated context for speaker {speaker_id} in conversation {conversation_index}")
+            
+        except Exception as e:
+            logger.error(f"Error updating context: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
     
     def _save_context(self, context: SpeakerContext):
         """Save context to database"""
@@ -175,8 +193,8 @@ class SpeakerContextManager:
             conn.execute('''
                 INSERT OR REPLACE INTO speaker_contexts
                 (speaker_id, interaction_count, last_interaction_time, common_intents,
-                 average_confidence, conversation_history, embedding_index)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                 average_confidence, conversation_history, embedding_index, embedding)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 context.speaker_id,
                 context.interaction_count,
@@ -184,7 +202,8 @@ class SpeakerContextManager:
                 json.dumps(dict(context.common_intents)),
                 context.average_confidence,
                 json.dumps(list(context.conversation_history)),
-                context.embedding_index
+                context.embedding_index,
+                json.dumps(context.embedding) if context.embedding else None
             ))
     
     def load_all_contexts(self):
@@ -198,8 +217,9 @@ class SpeakerContextManager:
                     last_interaction_time=datetime.fromisoformat(row[2]) if row[2] else None,
                     common_intents=defaultdict(int, json.loads(row[3])),
                     average_confidence=row[4],
-                    conversation_history=deque(json.loads(row[5]), maxlen=10),
-                    embedding_index=row[6]
+                    conversation_history=deque(json.loads(row[5]), maxlen=100),
+                    embedding_index=row[6],
+                    embedding=json.loads(row[7]) if row[7] else None
                 )
                 self.contexts[row[0]] = context
                 self.embedding_index = max(self.embedding_index, row[6] + 1)
@@ -258,7 +278,8 @@ if __name__ == "__main__":
     # Update context for a speaker
     manager.update_context(
         speaker_id="SPEAKER_1",
-        intent="greeting",
+        start_time=0.0,
+        end_time=1.0,
         confidence=0.9,
         transcript="Hey robot, how are you?"
     )

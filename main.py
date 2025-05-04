@@ -2,8 +2,6 @@ from models.nemo_diarization_model import diarize_speech, combine_diarization_wi
 from utils.rttm_parser import parse_rttm
 from robot.movement import move_robot_toward_speaker
 from utils.memory import SpeakerMemory
-from models.speaker_name_model import SpeakerNameModel
-from models.spoken_to_model import SpokenToModel, SpokenToFeatures, ProsodyFeatures
 from robot.spatial_audio import get_speaker_direction
 import nemo.collections.asr as nemo_asr
 import logging
@@ -68,20 +66,16 @@ def extract_voice_features(audio_data: np.ndarray, sr: int) -> Dict:
     }
 
 def process_audio(
-    audio_file: str,
-    speaker_name_model: SpeakerNameModel,
-    spoken_to_model: SpokenToModel
+    audio_file: str
 ) -> List[Dict]:
     """
     Process an audio file through the complete pipeline.
     
     Args:
         audio_file (str): Path to the audio file
-        speaker_name_model (SpeakerNameModel): Initialized speaker name model
-        spoken_to_model (SpokenToModel): Initialized spoken-to model
         
     Returns:
-        List[Dict]: List of processed segments with speaker info and robot-directed status
+        List[Dict]: List of processed segments with speaker info
     """
     try:
         # Step 1: Get speaker direction
@@ -106,43 +100,11 @@ def process_audio(
         # Step 5: Process each segment
         processed_segments = []
         for segment in segments:
-            # Extract voice features for this segment
-            # Note: In practice, you'd need to extract the audio segment first
-            voice_features = extract_voice_features(None, None)  # Placeholder
-            
-            # Get speaker name
-            name = speaker_name_model.update_speaker(
-                segment.speaker_id,
-                segment.transcript,
-                voice_features
-            )
-            
-            # Create features for spoken-to detection
-            features = SpokenToFeatures(
-                prosody=ProsodyFeatures(
-                    speaking_rate=0.0,  # Would need to calculate from word timestamps
-                    pitch_mean=0.0,     # Would need pitch analysis
-                    pitch_std=0.0,      # Would need pitch analysis
-                    volume_mean=0.0,    # Would need volume analysis
-                    volume_std=0.0      # Would need volume analysis
-                ),
-                speaker_angle=direction_info['angle'],
-                speaker_distance=direction_info['distance'],
-                num_speakers=len(diarization_results),
-                transcript=segment.transcript
-            )
-            
-            # Check if spoken to robot
-            is_spoken_to, confidence = spoken_to_model.is_spoken_to_robot(features)
-            
             processed_segments.append({
                 'speaker_id': segment.speaker_id,
-                'name': name,
                 'start_time': segment.start_time,
                 'end_time': segment.end_time,
                 'transcript': segment.transcript,
-                'is_spoken_to_robot': is_spoken_to,
-                'confidence': confidence,
                 'direction': direction_info
             })
             
@@ -152,27 +114,14 @@ def process_audio(
         logger.error(f"Audio processing failed: {str(e)}")
         raise
 
-def main():
-    # Initialize models
-    speaker_name_model = SpeakerNameModel()  # No API key needed now
-    spoken_to_model = SpokenToModel()
-    
-    # Process audio file
-    audio_file = "data/audio/sample_audio.wav"
-    
-    try:
-        segments = process_audio(audio_file, speaker_name_model, spoken_to_model)
+if __name__ == "__main__":
+    # Example usage
+    audio_file = "path/to/audio.wav"
+    segments = process_audio(audio_file)
         
         # Print results
         for segment in segments:
-            print(f"\nSpeaker {segment['name'] or segment['speaker_id']}:")
-            print(f"Time: {segment['start_time']:.2f}s - {segment['end_time']:.2f}s")
-            print(f"Transcript: {segment['transcript']}")
-            print(f"Spoken to robot: {segment['is_spoken_to_robot']} (confidence: {segment['confidence']:.2f})")
-            print(f"Direction: {segment['direction']}")
-            
-    except Exception as e:
-        logger.error(f"Error in main: {str(e)}")
-
-if __name__ == "__main__":
-    main()
+        print(f"Speaker {segment['speaker_id']}:")
+        print(f"  Time: {segment['start_time']:.2f} - {segment['end_time']:.2f}")
+        print(f"  Transcript: {segment['transcript']}")
+        print(f"  Direction: {segment['direction']}")

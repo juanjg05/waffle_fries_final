@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 
 import rclpy
@@ -5,43 +6,38 @@ from rclpy.node import Node
 from std_msgs.msg import String
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Audio
-from models.nemo_diarization_model import diarize_speech, combine_diarization_with_transcript
-from models.speaker_name_model import SpeakerNameModel
-from models.spoken_to_model import SpokenToModel, SpokenToFeatures, ProsodyFeatures
+from models.nemo_diarization_model import diarize_speech, combine_diarization_with_transcript, DiarizationResult
+from utils.rttm_parser import parse_rttm
+from robot.movement import move_robot_toward_speaker
+from utils.memory import SpeakerMemory
 from robot.spatial_audio import get_speaker_direction
 import nemo.collections.asr as nemo_asr
 import logging
-import numpy as np
+import os
 from typing import List, Tuple, Dict
+import json
+import numpy as np
 
 class AudioProcessorNode(Node):
     def __init__(self):
         super().__init__('audio_processor_node')
         
-        # Initialize models
-        self.speaker_name_model = SpeakerNameModel()
-        self.spoken_to_model = SpokenToModel()
-        self.asr_model = nemo_asr.models.EncDecCTCModel.from_pretrained("nvidia/quartznet15x5base-en")
+        # Initialize components
+        self.memory = SpeakerMemory()
         
-        # Create subscribers
+        # Create subscribers and publishers
         self.audio_sub = self.create_subscription(
             Audio,
             'audio_input',
             self.audio_callback,
-            10)
-            
-        # Create publishers
-        self.robot_cmd_pub = self.create_publisher(
-            Twist,
-            'cmd_vel',
-            10)
-            
-        self.speaker_info_pub = self.create_publisher(
-            String,
+            10
+        )
+        
+        self.speaker_pub = self.create_publisher(
+            SpeakerInfo,
             'speaker_info',
-            10)
-            
-        self.get_logger().info('Audio processor node initialized')
+            10
+        )
 
     def audio_callback(self, msg: Audio):
         """
@@ -69,51 +65,16 @@ class AudioProcessorNode(Node):
             
             # Process each segment
             for segment in segments:
-                # Extract voice features
-                voice_features = self.extract_voice_features(audio_data, msg.sample_rate)
-                
-                # Get speaker name
-                name = self.speaker_name_model.update_speaker(
-                    segment.speaker_id,
-                    segment.transcript,
-                    voice_features
-                )
-                
-                # Create features for spoken-to detection
-                features = SpokenToFeatures(
-                    prosody=ProsodyFeatures(
-                        speaking_rate=0.0,
-                        pitch_mean=0.0,
-                        pitch_std=0.0,
-                        volume_mean=0.0,
-                        volume_std=0.0
-                    ),
-                    speaker_angle=direction_info['angle'],
-                    speaker_distance=direction_info['distance'],
-                    num_speakers=len(diarization_results),
-                    transcript=segment.transcript
-                )
-                
-                # Check if spoken to robot
-                is_spoken_to, confidence = self.spoken_to_model.is_spoken_to_robot(features)
-                
-                # If spoken to robot, move towards speaker
-                if is_spoken_to and confidence > 0.7:
-                    self.move_robot_toward_speaker(direction_info)
-                
                 # Publish speaker info
                 speaker_info = {
                     'speaker_id': segment.speaker_id,
-                    'name': name,
                     'transcript': segment.transcript,
-                    'is_spoken_to_robot': is_spoken_to,
-                    'confidence': confidence,
                     'direction': direction_info
                 }
                 self.publish_speaker_info(speaker_info)
                 
         except Exception as e:
-            self.get_logger().error(f'Error processing audio: {str(e)}')
+            self.get_logger().error(f"Error processing audio: {str(e)}")
 
     def transcribe_audio(self, audio_data: np.ndarray) -> Tuple[str, List[Tuple[str, float, float]]]:
         """

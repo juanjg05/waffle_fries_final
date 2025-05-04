@@ -16,5 +16,6 @@ speechbrain>=0.5.15
 torchaudio>=2.0.0
 rttm>=0.1.0
 pydub>=0.25.1
-webrtcvad>=2.0.10
 noisereduce>=2.0.1
+opencv-python>=4.8.0
+mediapipe>=0.10.0

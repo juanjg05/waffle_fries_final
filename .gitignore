@@ -8,7 +8,7 @@ env.bak/
 venv.bak/
 
 
-fri_autonomous_template/
+fri_autonomous_template-main/
 # Python bytecode
 __pycache__/
 *.py[cod]
