@@ -4,7 +4,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String, ByteMultiArray
 from geometry_msgs.msg import Twist
-from models.diarization_model import diarize_speech, combine_diarization_with_transcript, DiarizationResult
+from robot_audio_processor.models.diarization_model import diarize_speech, combine_diarization_with_transcript, DiarizationResult
 from robot.movement import move_robot_toward_speaker
 from utils.memory import SpeakerMemory
 from robot.spatial_audio import get_speaker_direction

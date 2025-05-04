@@ -1,4 +1,6 @@
 # Python virtual environments
+
+bwi_ros2/
 venv/
 env/
 ENV/
