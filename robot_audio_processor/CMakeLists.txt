@@ -17,6 +17,7 @@ find_package(rclpy REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
 
 # Install Python modules
 ament_python_install_package(${PROJECT_NAME})
@@ -24,6 +25,7 @@ ament_python_install_package(${PROJECT_NAME})
 # Install Python executables
 install(PROGRAMS
   scripts/audio_processor_node.py
+  scripts/face_detection_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
