@@ -1,17 +1,14 @@
-
 #!/usr/bin/env python3
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String
+from std_msgs.msg import String, ByteMultiArray
 from geometry_msgs.msg import Twist
-from sensor_msgs.msg import Audio
-from models.nemo_diarization_model import diarize_speech, combine_diarization_with_transcript, DiarizationResult
-from utils.rttm_parser import parse_rttm
+from models.diarization_model import diarize_speech, combine_diarization_with_transcript, DiarizationResult
 from robot.movement import move_robot_toward_speaker
 from utils.memory import SpeakerMemory
 from robot.spatial_audio import get_speaker_direction
-import nemo.collections.asr as nemo_asr
+import whisper
 import logging
 import os
 from typing import List, Tuple, Dict
@@ -27,24 +24,24 @@ class AudioProcessorNode(Node):
         
         # Create subscribers and publishers
         self.audio_sub = self.create_subscription(
-            Audio,
+            ByteMultiArray,
             'audio_input',
             self.audio_callback,
             10
         )
         
         self.speaker_pub = self.create_publisher(
-            SpeakerInfo,
+            String,
             'speaker_info',
             10
         )
 
-    def audio_callback(self, msg: Audio):
+    def audio_callback(self, msg: ByteMultiArray):
         """
         Process incoming audio messages
         """
         try:
-            # Convert audio message to numpy array
+            # Convert ByteMultiArray to numpy array
             audio_data = np.frombuffer(msg.data, dtype=np.float32)
             
             # Get speaker direction
@@ -78,20 +75,22 @@ class AudioProcessorNode(Node):
 
     def transcribe_audio(self, audio_data: np.ndarray) -> Tuple[str, List[Tuple[str, float, float]]]:
         """
-        Transcribe audio data using the ASR model
+        Transcribe audio data using Whisper
         """
         try:
-            transcription = self.asr_model.transcribe(
-                [audio_data],
-                return_hypotheses=True,
-                batch_size=1
-            )
+            # Load Whisper model
+            model = whisper.load_model("base")
+
+            # Perform transcription
+            result = model.transcribe(audio_data)
             
+            # Extract word timestamps
             word_timestamps = []
-            for word in transcription[0].words:
-                word_timestamps.append((word.word, word.start_time, word.end_time))
+            for segment in result["segments"]:
+                for word in segment["words"]:
+                    word_timestamps.append((word["word"], word["start"], word["end"]))
                 
-            return transcription[0].text, word_timestamps
+            return result["text"], word_timestamps
             
         except Exception as e:
             self.get_logger().error(f'Transcription failed: {str(e)}')
@@ -127,8 +126,8 @@ class AudioProcessorNode(Node):
         Publish speaker information
         """
         msg = String()
-        msg.data = str(info)
-        self.speaker_info_pub.publish(msg)
+        msg.data = json.dumps(info)
+        self.speaker_pub.publish(msg)
 
 def main(args=None):
     rclpy.init(args=args)

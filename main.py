@@ -1,9 +1,8 @@
-from models.nemo_diarization_model import diarize_speech, combine_diarization_with_transcript, DiarizationResult
-from utils.rttm_parser import parse_rttm
+from models.diarization_model import diarize_speech, combine_diarization_with_transcript, DiarizationResult
 from robot.movement import move_robot_toward_speaker
 from utils.memory import SpeakerMemory
 from robot.spatial_audio import get_speaker_direction
-import nemo.collections.asr as nemo_asr
+import whisper
 import logging
 import os
 from typing import List, Tuple, Dict
@@ -16,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def transcribe_audio(audio_file: str) -> Tuple[str, List[Tuple[str, float, float]]]:
     """
-    Transcribes the audio file using a pre-trained ASR model.
+    Transcribes the audio file using Whisper.
 
     Args:
         audio_file (str): Path to the audio file.
@@ -25,22 +24,19 @@ def transcribe_audio(audio_file: str) -> Tuple[str, List[Tuple[str, float, float
         Tuple[str, List[Tuple[str, float, float]]]: (transcription, word_timestamps)
     """
     try:
-        # Load a pre-trained ASR model
-        asr_model = nemo_asr.models.EncDecCTCModel.from_pretrained("nvidia/quartznet15x5base-en")
+        # Load Whisper model
+        model = whisper.load_model("base")
 
-        # Perform transcription with word timestamps
-        transcription = asr_model.transcribe(
-            [audio_file],
-            return_hypotheses=True,
-            batch_size=1
-        )
+        # Perform transcription
+        result = model.transcribe(audio_file)
         
         # Extract word timestamps
         word_timestamps = []
-        for word in transcription[0].words:
-            word_timestamps.append((word.word, word.start_time, word.end_time))
+        for segment in result["segments"]:
+            for word in segment["words"]:
+                word_timestamps.append((word["word"], word["start"], word["end"]))
             
-        return transcription[0].text, word_timestamps
+        return result["text"], word_timestamps
         
     except Exception as e:
         logger.error(f"Transcription failed: {str(e)}")
@@ -118,9 +114,9 @@ if __name__ == "__main__":
     # Example usage
     audio_file = "path/to/audio.wav"
     segments = process_audio(audio_file)
-        
-        # Print results
-        for segment in segments:
+    
+    # Print results
+    for segment in segments:
         print(f"Speaker {segment['speaker_id']}:")
         print(f"  Time: {segment['start_time']:.2f} - {segment['end_time']:.2f}")
         print(f"  Transcript: {segment['transcript']}")
