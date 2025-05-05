@@ -15,7 +15,6 @@
   <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>sensor_msgs</depend>
-  <depend>audio_common_msgs</depend>
 
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-whisper</exec_depend>
