@@ -3,6 +3,8 @@ project(robot_audio_processor)
 
 # Set Python interpreter path
 set(PYTHON_EXECUTABLE "/home/10_fri/bwi_ros2/src/venv/bin/python")
+set(PYTHON_INCLUDE_DIR "/home/10_fri/bwi_ros2/src/venv/include/python3.10")
+set(PYTHON_LIBRARY "/home/10_fri/bwi_ros2/src/venv/lib/libpython3.10.so")
 
 # Default to C++14
 if(NOT CMAKE_CXX_STANDARD)
