@@ -143,7 +143,7 @@ class RealTimeProcessor:
             import librosa
             
                 # Load audio file
-                audio_signal, sample_rate = sf.read(audio_path)
+            audio_signal, sample_rate = sf.read(audio_path)
                 
             # Handle mono/stereo
             if len(audio_signal.shape) > 1:
@@ -494,8 +494,7 @@ class RealTimeProcessor:
                             )
                             
                             # Call callback
-                    callback(result)
-                            
+                            callback(result)
                             # Update speaker embeddings and save to JSON
                             self.speaker_embeddings[segment['speaker']] = embedding
                             self.context_manager.update_context(
@@ -508,7 +507,6 @@ class RealTimeProcessor:
                                 conversation_index=self.conversation_index  # Add conversation index
                             )
                             logger.info(f"Updated context for speaker {segment['speaker']} in conversation {self.conversation_index}")
-                            
                         except Exception as e:
                             logger.error(f"Error processing segment: {str(e)}")
                             logger.error(f"Traceback: {traceback.format_exc()}")
