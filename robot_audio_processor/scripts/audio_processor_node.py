@@ -4,7 +4,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String, ByteMultiArray
 from geometry_msgs.msg import Twist
-from robot_audio_processor.models.diarization_model import diarize_speech, combine_diarization_with_transcript, DiarizationResult
+from robot_audio_processor.models.diarization_model import diarize_speech, DiarizationResult
 from robot.movement import move_robot_toward_speaker
 from utils.memory import SpeakerMemory
 from robot.spatial_audio import get_speaker_direction
@@ -53,15 +53,8 @@ class AudioProcessorNode(Node):
             # Transcribe audio
             transcript, word_timestamps = self.transcribe_audio(audio_data)
             
-            # Combine diarization with transcript
-            segments = combine_diarization_with_transcript(
-                diarization_results,
-                transcript,
-                word_timestamps
-            )
-            
             # Process each segment
-            for segment in segments:
+            for segment in diarization_results:
                 # Publish speaker info
                 speaker_info = {
                     'speaker_id': segment.speaker_id,

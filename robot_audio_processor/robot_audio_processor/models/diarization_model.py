@@ -542,6 +542,38 @@ def diarize_speech(audio_path, callback, num_speakers=None):
     processor = RealTimeProcessor()
     processor.process_audio(audio_path, callback, num_speakers)
 
+def combine_diarization_with_transcript(diarization_results, transcript, word_timestamps):
+    """
+    Assigns transcript text to each diarization segment based on time overlap.
+    Each segment will get the words whose timestamps fall within the segment's start and end time.
+    """
+    combined_segments = []
+    for segment in diarization_results:
+        seg_start = segment.start_time
+        seg_end = segment.end_time
+        # Collect words that fall within this segment
+        words_in_segment = [
+            word for word, start, end in word_timestamps
+            if start >= seg_start and end <= seg_end
+        ]
+        segment_transcript = " ".join(words_in_segment)
+        # If no words matched, fallback to the full transcript
+        if not segment_transcript:
+            segment_transcript = transcript
+        # Create a new segment with transcript
+        combined_segments.append(
+            DiarizationResult(
+                speaker_id=segment.speaker_id,
+                start_time=segment.start_time,
+                end_time=segment.end_time,
+                transcript=segment_transcript,
+                confidence=segment.confidence,
+                speaker_embedding=segment.speaker_embedding,
+                speaker_confidence=segment.speaker_confidence
+            )
+        )
+    return combined_segments
+
 # Example usage:
 if __name__ == "__main__":
     # Initialize processor
