@@ -14,16 +14,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
     ],
-    install_requires=[
-        'setuptools',
-        'numpy',
-        'scikit-learn',
-        'torch',
-        'mediapipe',
-        'sentencepiece',
-        'pytorch_lightning',
-        'Cython'
-    ],
+    install_requires=['setuptools'],
     zip_safe=True,
     maintainer='juanjg05',
     maintainer_email='juanjgarcia05@gmail.com',
