@@ -538,6 +538,10 @@ class RealTimeProcessor:
         self.context_manager.import_contexts(filepath)
         self._load_speaker_embeddings()
 
+def diarize_speech(audio_path, callback, num_speakers=None):
+    processor = RealTimeProcessor()
+    processor.process_audio(audio_path, callback, num_speakers)
+
 # Example usage:
 if __name__ == "__main__":
     # Initialize processor
