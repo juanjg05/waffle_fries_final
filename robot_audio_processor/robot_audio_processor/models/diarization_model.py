@@ -24,13 +24,39 @@ class DiarizationResult:
                  transcript: str = "", confidence: float = 1.0,
                  speaker_embedding: Optional[np.ndarray] = None,
                  speaker_confidence: float = 1.0):
+        """
+        Represents a diarized speech segment with speaker identification and transcription.
+        
+        Args:
+            speaker_id: Unique identifier for the speaker
+            start_time: Start time of the segment in seconds
+            end_time: End time of the segment in seconds
+            transcript: Transcribed text of the segment
+            confidence: Confidence score from the diarization model (0-1) indicating how confident
+                       the model is about the speaker segmentation and timing
+            speaker_embedding: Vector embedding of the speaker's voice characteristics
+            speaker_confidence: Confidence score (0-1) from the speaker identification model
+                              indicating how confident the model is about the speaker's identity
+        """
         self.speaker_id = speaker_id
         self.start_time = start_time
         self.end_time = end_time
         self.transcript = transcript
-        self.confidence = confidence
+        self.confidence = confidence  # Diarization confidence (segmentation and timing)
         self.speaker_embedding = speaker_embedding
-        self.speaker_confidence = speaker_confidence
+        self.speaker_confidence = speaker_confidence  # Speaker identification confidence
+
+    def to_dict(self) -> Dict:
+        """Convert the result to a dictionary for JSON serialization."""
+        return {
+            "speaker_id": self.speaker_id,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "transcript": self.transcript,
+            "diarization_confidence": self.confidence,  # Renamed for clarity
+            "speaker_confidence": self.speaker_confidence,
+            "speaker_embedding": self.speaker_embedding.tolist() if self.speaker_embedding is not None else None
+        }
 
 class RealTimeProcessor:
     def __init__(self, 
@@ -454,65 +480,75 @@ class RealTimeProcessor:
             batch_size = 8
             for i in range(0, len(segments), batch_size):
                 batch = segments[i:i + batch_size]
-                logger.info(f"Processing batch {i//batch_size + 1}/{(len(segments)-1)//batch_size + 1}")
                 
-                # Get embeddings for batch
-                embeddings = []
-                confidences = []
+                # Process each segment in the batch
                 for segment in batch:
-                    embedding, confidence = self._get_speaker_embedding(segment['audio'], segment['sample_rate'])
-                    embeddings.append(embedding)
-                    confidences.append(confidence)
-                
-                # Process each segment in batch
-                for segment, embedding, confidence in zip(batch, embeddings, confidences):
-                    if embedding is not None:
-                        try:
-                            # Save segment to temporary file for transcription
-                            temp_path = f"temp_segment_{segment['start_time']:.2f}_{segment['end_time']:.2f}.wav"
-                            sf.write(temp_path, segment['audio'], segment['sample_rate'])
-                            logger.info(f"Saved temp segment to {temp_path}")
-                            
-                            # Transcribe with Whisper
-                            logger.info(f"Transcribing segment {segment['start_time']:.2f}-{segment['end_time']:.2f}")
-                            transcript_result = self.asr_model.transcribe(temp_path)
-                            transcript = transcript_result['text'].strip()
-                            logger.info(f"Transcript: {transcript}")
-                            
-                            # Clean up temporary file
-                            os.remove(temp_path)
-                            
-                            # Create result
-                            result = DiarizationResult(
-                                speaker_id=segment['speaker'],
-                                start_time=segment['start_time'],
-                                end_time=segment['end_time'],
-                                transcript=transcript,
-                                confidence=confidence,
-                                speaker_confidence=confidence,
-                                speaker_embedding=embedding
+                    try:
+                        # Get speaker embedding
+                        embedding, confidence = self._get_speaker_embedding(
+                            segment['audio'],
+                            segment['sample_rate']
+                        )
+                        
+                        if embedding is None:
+                            logger.warning(f"Failed to get embedding for speaker {segment['speaker']}")
+                            continue
+                        
+                        # Find matching speaker
+                        matched_speaker = self._find_matching_speaker(embedding)
+                        
+                        # Transcribe segment
+                        transcript = self.asr_model.transcribe(
+                            segment['audio'],
+                            start=segment['start_time'],
+                            end=segment['end_time']
+                        )['text']
+                        
+                        # Get face direction from spoken-to model if available
+                        face_direction = None
+                        face_angle = None
+                        if hasattr(self, 'spoken_to_model'):
+                            result = self.spoken_to_model.is_spoken_to(
+                                speaker_count=1,  # We're processing one segment at a time
+                                active_speaker_id=matched_speaker,
+                                face_direction=None,  # Will be determined by spoken-to model
+                                face_confidence=confidence
                             )
-                            
-                            # Call callback
+                            face_direction = result.face_direction.value if result.face_direction else None
+                            face_angle = result.face_angle
+                        
+                        # Update speaker context
+                        self.context_manager.update_context(
+                            speaker_id=matched_speaker,
+                            start_time=segment['start_time'],
+                            end_time=segment['end_time'],
+                            confidence=confidence,
+                            transcript=transcript,
+                            embedding=embedding.tolist(),
+                            conversation_index=self.conversation_index,
+                            face_direction=face_direction,
+                            face_angle=face_angle
+                        )
+                        
+                        # Create diarization result
+                        result = DiarizationResult(
+                            speaker_id=matched_speaker,
+                            start_time=segment['start_time'],
+                            end_time=segment['end_time'],
+                            transcript=transcript,
+                            confidence=confidence,
+                            speaker_embedding=embedding,
+                            speaker_confidence=confidence
+                        )
+                        
+                        # Call callback with result
+                        if callback:
                             callback(result)
-                            # Update speaker embeddings and save to JSON
-                            self.speaker_embeddings[segment['speaker']] = embedding
-                            self.context_manager.update_context(
-                                speaker_id=segment['speaker'],
-                                start_time=segment['start_time'],
-                                end_time=segment['end_time'],
-                                confidence=confidence,
-                                transcript=transcript,
-                                embedding=embedding.tolist(),  # Convert numpy array to list for JSON serialization
-                                conversation_index=self.conversation_index  # Add conversation index
-                            )
-                            logger.info(f"Updated context for speaker {segment['speaker']} in conversation {self.conversation_index}")
-                        except Exception as e:
-                            logger.error(f"Error processing segment: {str(e)}")
-                            logger.error(f"Traceback: {traceback.format_exc()}")
-                    else:
-                        logger.warning(f"Failed to process segment for speaker {segment['speaker']}")
-                
+                            
+                    except Exception as e:
+                        logger.error(f"Error processing segment: {str(e)}")
+                        logger.error(f"Traceback: {traceback.format_exc()}")
+            
             # Save contexts after processing all segments
             self.context_manager.save()
             logger.info("Saved all speaker contexts")

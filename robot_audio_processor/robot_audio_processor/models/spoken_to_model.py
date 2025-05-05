@@ -15,6 +15,7 @@ from std_msgs.msg import Float32
 import cv_bridge
 import time
 from collections import defaultdict
+from robot_audio_processor.utils.speaker_context_manager import SpeakerContextManager
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -43,6 +44,7 @@ class SpokenToResult:
     explanation: str = ""
     face_angle: Optional[float] = None  # Angle of face relative to camera
     audio_angle: Optional[float] = None  # Angle of audio source
+    speaker_history: Optional[List[Dict]] = None  # Recent conversation history
 
 class SpokenToModel(Node):
     def __init__(self, 
@@ -111,6 +113,9 @@ class SpokenToModel(Node):
         # Track active speakers
         self.active_speakers = {}  # Dict[str, Speaker]
         self.last_cleanup_time = time.time()
+        
+        # Initialize speaker context manager
+        self.context_manager = SpeakerContextManager()
         
         logger.info("Initialized Spoken-to model with face and audio detection")
     
@@ -307,7 +312,8 @@ class SpokenToModel(Node):
                     face_confidence: float = 0.0,
                     face_angle: Optional[float] = None) -> SpokenToResult:
         """
-        Determine if the robot is being spoken to based on speaker count and face direction.
+        Determine if the robot is being spoken to based on speaker count, face direction,
+        and speaker history.
         
         Args:
             speaker_count: Number of speakers detected
@@ -320,6 +326,23 @@ class SpokenToModel(Node):
             SpokenToResult with decision and explanation
         """
         try:
+            # Get speaker history if we have an active speaker
+            speaker_history = None
+            if active_speaker_id:
+                speaker_history = self.context_manager.get_speaker_history(active_speaker_id)
+                
+                # Check if this speaker has a history of speaking to the robot
+                if speaker_history:
+                    recent_interactions = speaker_history[-5:]  # Look at last 5 interactions
+                    speaking_to_robot_count = sum(
+                        1 for interaction in recent_interactions
+                        if interaction.get('face_direction') == FaceDirection.TOWARDS
+                    )
+                    
+                    # If speaker has a history of speaking to the robot, increase confidence
+                    if speaking_to_robot_count >= 2:
+                        face_confidence = min(1.0, face_confidence + 0.2)
+            
             # If only one speaker, they are likely speaking to the robot
             if speaker_count == 1:
                 return SpokenToResult(
@@ -329,7 +352,8 @@ class SpokenToModel(Node):
                     speaker_count=speaker_count,
                     active_speaker_id=active_speaker_id,
                     explanation="Single speaker detected - likely speaking to robot",
-                    face_angle=face_angle
+                    face_angle=face_angle,
+                    speaker_history=speaker_history
                 )
             
             # If multiple speakers, check face direction
@@ -345,7 +369,8 @@ class SpokenToModel(Node):
                     speaker_count=speaker_count,
                     active_speaker_id=active_speaker_id,
                     explanation="Face is directed towards robot",
-                    face_angle=face_angle
+                    face_angle=face_angle,
+                    speaker_history=speaker_history
                 )
             elif face_direction == FaceDirection.AWAY:
                 return SpokenToResult(
@@ -355,7 +380,8 @@ class SpokenToModel(Node):
                     speaker_count=speaker_count,
                     active_speaker_id=active_speaker_id,
                     explanation="Face is directed away from robot",
-                    face_angle=face_angle
+                    face_angle=face_angle,
+                    speaker_history=speaker_history
                 )
             else:
                 # If face direction is unknown or confidence is low
@@ -366,7 +392,8 @@ class SpokenToModel(Node):
                     speaker_count=speaker_count,
                     active_speaker_id=active_speaker_id,
                     explanation="Cannot determine if robot is being spoken to",
-                    face_angle=face_angle
+                    face_angle=face_angle,
+                    speaker_history=speaker_history
                 )
                 
         except Exception as e:
@@ -378,7 +405,8 @@ class SpokenToModel(Node):
                 speaker_count=speaker_count,
                 active_speaker_id=active_speaker_id,
                 explanation=f"Error: {str(e)}",
-                face_angle=face_angle
+                face_angle=face_angle,
+                speaker_history=speaker_history
             )
 
 def main(args=None):

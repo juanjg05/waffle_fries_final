@@ -102,7 +102,9 @@ class SpeakerContextManager:
                     conversation_history TEXT,
                     embedding_index INTEGER,
                     embedding TEXT,
-                    conversation_index INTEGER DEFAULT 1
+                    conversation_index INTEGER DEFAULT 1,
+                    has_face_direction BOOLEAN DEFAULT 0,
+                    num_speakers INTEGER DEFAULT 1
                 )
             ''')
     
@@ -150,7 +152,10 @@ class SpeakerContextManager:
         
         return self.contexts[speaker_id]
     
-    def update_context(self, speaker_id: str, start_time: float, end_time: float, confidence: float, transcript: str = "", embedding: Optional[List[float]] = None, conversation_index: int = 1):
+    def update_context(self, speaker_id: str, start_time: float, end_time: float, confidence: float, 
+                      transcript: str = "", embedding: Optional[List[float]] = None, 
+                      conversation_index: int = 1, face_direction: Optional[str] = None,
+                      face_angle: Optional[float] = None, num_speakers: int = 1):
         """Update speaker context with new interaction"""
         try:
             # Get existing context or create new one
@@ -170,14 +175,19 @@ class SpeakerContextManager:
                 logger.info(f"Updated embedding for speaker {speaker_id}")
             
             # Add to conversation history
-            context.conversation_history.append({
+            history_entry = {
                 'conversation_index': conversation_index,
                 'timestamp': context.last_interaction_time.isoformat(),
                 'start_time': start_time,
                 'end_time': end_time,
                 'confidence': confidence,
-                'transcript': transcript
-            })
+                'transcript': transcript,
+                'face_direction': face_direction,
+                'face_angle': face_angle,
+                'has_face_direction': face_direction is not None and face_angle is not None,
+                'num_speakers': num_speakers
+            }
+            context.conversation_history.append(history_entry)
             
             # Save to database
             self._save_context(context)
@@ -193,8 +203,8 @@ class SpeakerContextManager:
             conn.execute('''
                 INSERT OR REPLACE INTO speaker_contexts
                 (speaker_id, interaction_count, last_interaction_time, common_intents,
-                 average_confidence, conversation_history, embedding_index, embedding)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 average_confidence, conversation_history, embedding_index, embedding, has_face_direction, num_speakers)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 context.speaker_id,
                 context.interaction_count,
@@ -203,7 +213,9 @@ class SpeakerContextManager:
                 context.average_confidence,
                 json.dumps(list(context.conversation_history)),
                 context.embedding_index,
-                json.dumps(context.embedding) if context.embedding else None
+                json.dumps(context.embedding) if context.embedding else None,
+                any(entry.get('has_face_direction', False) for entry in context.conversation_history),
+                max(entry.get('num_speakers', 1) for entry in context.conversation_history)
             ))
     
     def load_all_contexts(self):
@@ -281,7 +293,9 @@ if __name__ == "__main__":
         start_time=0.0,
         end_time=1.0,
         confidence=0.9,
-        transcript="Hey robot, how are you?"
+        transcript="Hey robot, how are you?",
+        face_direction="front",
+        face_angle=0.0
     )
     
     # Get speaker history
