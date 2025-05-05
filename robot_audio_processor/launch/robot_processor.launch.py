@@ -12,12 +12,21 @@ def generate_launch_description():
     venv_python = os.path.join(venv_dir, 'bin', 'python3')
     venv_site_packages = os.path.join(venv_dir, 'lib', 'python3.10', 'site-packages')
     
+    # Create log directory if it doesn't exist
+    log_dir = os.path.join(os.path.expanduser('~'), '.ros', 'log')
+    os.makedirs(log_dir, exist_ok=True)
+    
     # Set up environment variables
     env = {
         'PYTHONPATH': f"{venv_site_packages}:{os.environ.get('PYTHONPATH', '')}",
         'PATH': f"{os.path.join(venv_dir, 'bin')}:{os.environ.get('PATH', '')}",
         'LD_LIBRARY_PATH': f"{os.path.join(venv_dir, 'lib')}:{os.environ.get('LD_LIBRARY_PATH', '')}",
-        'HF_TOKEN': os.environ.get('HF_TOKEN', '')
+        'HF_TOKEN': os.environ.get('HF_TOKEN', ''),
+        'ROS_LOG_DIR': log_dir,
+        'ROS_HOME': os.path.join(os.path.expanduser('~'), '.ros'),
+        'ROS_VERSION': '2',
+        'ROS_PYTHON_VERSION': '3',
+        'ROS_DISTRO': 'humble'
     }
 
     # Declare launch arguments
