@@ -39,7 +39,7 @@ def generate_launch_description():
         executable='audio_processor_node.py',
         name='audio_processor_node',
         output='screen',
-        env=[{'name': 'HF_TOKEN', 'value': EnvironmentVariable('HF_TOKEN', default_value='')}]
+        env={'HF_TOKEN': EnvironmentVariable('HF_TOKEN', default_value='')}
     )
     
     # Launch the face detection node only if use_kinect is true
@@ -49,7 +49,7 @@ def generate_launch_description():
         name='face_detection_node',
         output='screen',
         condition=IfCondition(LaunchConfiguration('use_kinect')),
-        env=[{'name': 'HF_TOKEN', 'value': EnvironmentVariable('HF_TOKEN', default_value='')}]
+        env={'HF_TOKEN': EnvironmentVariable('HF_TOKEN', default_value='')}
     )
     
     # Launch the movement controller node
