@@ -32,22 +32,25 @@ def generate_launch_description():
     
     # Get the virtual environment path
     venv_path = os.path.join(os.path.expanduser('~'), 'bwi_ros2', 'src', 'venv')
+    python_executable = os.path.join(venv_path, 'bin', 'python3')
     
     # Set up environment variables
     env_vars = {
         'HF_TOKEN': hf_token,
-        'PYTHONPATH': f"{venv_path}/lib/python3.10/site-packages:{os.environ.get('PYTHONPATH', '')}",
+        'PYTHONPATH': f"{venv_path}/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:{os.environ.get('PYTHONPATH', '')}",
         'PATH': f"{venv_path}/bin:{os.environ.get('PATH', '')}",
         'LD_LIBRARY_PATH': f"/opt/ros/humble/lib:{os.environ.get('LD_LIBRARY_PATH', '')}",
         'ROS_VERSION': '2',
         'ROS_PYTHON_VERSION': '3',
-        'ROS_DISTRO': 'humble'
+        'ROS_DISTRO': 'humble',
+        'PYTHONHOME': venv_path
     }
     
     # Launch the audio processor node with environment variables
     audio_node = Node(
         package='robot_audio_processor',
-        executable='audio_processor_node.py',
+        executable=python_executable,
+        arguments=['/home/10_fri/bwi_ros2/install/robot_audio_processor/lib/robot_audio_processor/audio_processor_node.py'],
         name='audio_processor_node',
         output='screen',
         env=env_vars
@@ -56,7 +59,8 @@ def generate_launch_description():
     # Launch the face detection node only if use_kinect is true
     face_node = Node(
         package='robot_audio_processor',
-        executable='face_detection_node.py',
+        executable=python_executable,
+        arguments=['/home/10_fri/bwi_ros2/install/robot_audio_processor/lib/robot_audio_processor/face_detection_node.py'],
         name='face_detection_node',
         output='screen',
         condition=IfCondition(LaunchConfiguration('use_kinect')),
@@ -66,7 +70,8 @@ def generate_launch_description():
     # Launch the movement controller node
     movement_node = Node(
         package='robot_audio_processor',
-        executable='movement_controller_node.py',
+        executable=python_executable,
+        arguments=['/home/10_fri/bwi_ros2/install/robot_audio_processor/lib/robot_audio_processor/movement_controller_node.py'],
         name='movement_controller_node',
         output='screen',
         env=env_vars
