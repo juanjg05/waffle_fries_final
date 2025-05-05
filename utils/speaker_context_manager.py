@@ -251,24 +251,56 @@ class SpeakerContextManager:
         ]
     
     def export_contexts(self, filepath: str):
-        """Export all contexts to a JSON file"""
-        data = {
-            speaker_id: context.to_dict()
-            for speaker_id, context in self.contexts.items()
-        }
-        with open(filepath, 'w') as f:
-            json.dump(data, f, indent=2)
-    
-    def import_contexts(self, filepath: str):
-        """Import contexts from a JSON file"""
-        with open(filepath, 'r') as f:
-            data = json.load(f)
+        """
+        Export all speaker contexts to a JSON file.
         
-        for speaker_id, context_data in data.items():
-            context = SpeakerContext.from_dict(context_data)
-            self.contexts[speaker_id] = context
-            self._save_context(context)
-            self.embedding_index = max(self.embedding_index, context.embedding_index + 1)
+        Args:
+            filepath: Path to save the JSON file
+        """
+        try:
+            # Convert all contexts to dictionaries
+            contexts_data = {
+                speaker_id: context.to_dict()
+                for speaker_id, context in self.contexts.items()
+            }
+            
+            # Save to JSON file
+            with open(filepath, 'w') as f:
+                json.dump(contexts_data, f, indent=2)
+            
+            logger.info(f"Exported {len(contexts_data)} speaker contexts to {filepath}")
+            
+        except Exception as e:
+            logger.error(f"Error exporting contexts: {str(e)}")
+            raise
+
+    def import_contexts(self, filepath: str):
+        """
+        Import speaker contexts from a JSON file.
+        
+        Args:
+            filepath: Path to the JSON file
+        """
+        try:
+            # Load from JSON file
+            with open(filepath, 'r') as f:
+                contexts_data = json.load(f)
+            
+            # Convert to SpeakerContext objects
+            for speaker_id, data in contexts_data.items():
+                context = SpeakerContext.from_dict(data)
+                self.contexts[speaker_id] = context
+                self.embedding_index = max(self.embedding_index, context.embedding_index + 1)
+            
+            # Save to database
+            for context in self.contexts.values():
+                self._save_context(context)
+            
+            logger.info(f"Imported {len(contexts_data)} speaker contexts from {filepath}")
+            
+        except Exception as e:
+            logger.error(f"Error importing contexts: {str(e)}")
+            raise
 
 # Example usage:
 if __name__ == "__main__":

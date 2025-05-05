@@ -262,7 +262,7 @@ class SpatialAudioProcessor:
 def get_speaker_direction(audio_file: str, depth_data: Optional[np.ndarray] = None,
                          speaker_ids: Optional[List[str]] = None) -> List[Dict[str, float]]:
     """
-    Process spatial audio to determine speaker directions using Azure Kinect microphone array.
+    Process an audio file to get speaker directions.
     
     Args:
         audio_file (str): Path to the audio file
@@ -270,28 +270,38 @@ def get_speaker_direction(audio_file: str, depth_data: Optional[np.ndarray] = No
         speaker_ids (Optional[List[str]]): NeMo speaker IDs if available
         
     Returns:
-        List[Dict[str, float]]: List of dictionaries containing speaker information:
-            - 'angle': Angle in degrees (0 is front, 90 is right, -90 is left)
-            - 'confidence': Confidence score between 0 and 1
-            - 'distance': Estimated distance in meters if available
-            - 'speaker_id': NeMo speaker ID if available
+        List[Dict[str, float]]: List of speaker directions with angles and distances
     """
-    # Load the audio file
-    audio_data, sr = librosa.load(audio_file, sr=None, mono=False)
-    
-    # Initialize processor
-    processor = SpatialAudioProcessor(sr)
-    
-    # Process audio
-    speakers = processor.process_audio(audio_data, depth_data, speaker_ids=speaker_ids)
-    
-    # Convert to dictionary format
-    return [{
-        'angle': speaker.angle,
-        'confidence': speaker.confidence,
-        'distance': speaker.distance if speaker.distance is not None else 0.0,
-        'speaker_id': speaker.speaker_id
-    } for speaker in speakers]
+    try:
+        # Load audio file
+        audio_data, sr = librosa.load(audio_file, sr=None, mono=False)
+        
+        # Initialize processor
+        processor = SpatialAudioProcessor(sample_rate=sr)
+        
+        # Process audio
+        speaker_locations = processor.process_audio(
+            audio_data,
+            depth_data=depth_data,
+            current_time=0.0,  # We don't need precise timing for file processing
+            speaker_ids=speaker_ids
+        )
+        
+        # Convert to dictionary format
+        directions = []
+        for loc in speaker_locations:
+            direction = {
+                'angle': np.radians(loc.angle),  # Convert to radians for robot movement
+                'distance': loc.distance if loc.distance is not None else 1.0,  # Default to 1m if no depth
+                'confidence': loc.confidence
+            }
+            directions.append(direction)
+            
+        return directions
+        
+    except Exception as e:
+        logger.error(f"Error in get_speaker_direction: {str(e)}")
+        raise
 
 # Example usage:
 if __name__ == "__main__":

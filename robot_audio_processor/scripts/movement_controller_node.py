@@ -17,6 +17,16 @@ class MovementControllerNode(Node):
         self.current_face_direction = None
         self.last_face_angle = 0.0
         
+        # Movement parameters based on segway_rmp_ros2
+        self.max_linear_vel = 0.75  # m/s
+        self.max_angular_vel = 28.65  # deg/s
+        self.linear_accel_limit = 0.1  # m/s^2
+        self.angular_accel_limit = 1.0  # deg/s^2
+        
+        # Current velocities
+        self.current_linear_vel = 0.0
+        self.current_angular_vel = 0.0
+        
         # Create subscribers
         self.face_sub = self.create_subscription(
             String,
@@ -37,6 +47,12 @@ class MovementControllerNode(Node):
             Twist,
             'cmd_vel',
             10
+        )
+        
+        # Create timer for smooth movement updates
+        self.movement_timer = self.create_timer(
+            0.05,  # 20Hz update rate
+            self.update_movement
         )
         
         self.get_logger().info('Movement controller node initialized')
@@ -74,20 +90,45 @@ class MovementControllerNode(Node):
             
     def turn_towards_speaker(self):
         """
-        Turn the robot towards the detected speaker
+        Set target velocities for turning towards the speaker
+        """
+        # Convert angle to radians for angular velocity calculation
+        angle_rad = np.radians(self.last_face_angle)
+        
+        # Calculate target angular velocity (proportional control)
+        target_angular_vel = -angle_rad * 0.5  # Negative because positive angle means turn right
+        
+        # Limit angular velocity
+        self.current_angular_vel = np.clip(
+            target_angular_vel,
+            -self.max_angular_vel,
+            self.max_angular_vel
+        )
+        
+        # Set small forward velocity when turning
+        self.current_linear_vel = 0.1
+        
+        self.get_logger().info(f'Target angular velocity: {self.current_angular_vel:.2f} rad/s')
+    
+    def update_movement(self):
+        """
+        Update movement commands with smooth acceleration
         """
         cmd = Twist()
         
-        # Calculate angular velocity based on face angle
-        # Positive angle means turn right, negative means turn left
-        angular_vel = np.clip(self.last_face_angle * 0.1, -0.5, 0.5)
-        cmd.angular.z = angular_vel
+        # Apply acceleration limits
+        if self.current_linear_vel > 0:
+            cmd.linear.x = min(self.current_linear_vel, self.linear_accel_limit)
+        else:
+            cmd.linear.x = max(self.current_linear_vel, -self.linear_accel_limit)
+            
+        if self.current_angular_vel > 0:
+            cmd.angular.z = min(self.current_angular_vel, self.angular_accel_limit)
+        else:
+            cmd.angular.z = max(self.current_angular_vel, -self.angular_accel_limit)
         
-        # Small forward velocity to keep moving towards the speaker
-        cmd.linear.x = 0.1
-        
+        # Publish movement command
         self.cmd_vel_pub.publish(cmd)
-        self.get_logger().info(f'Turning towards speaker with angular velocity: {angular_vel}')
 
 def main(args=None):
     rclpy.init(args=args)

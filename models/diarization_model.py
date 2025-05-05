@@ -142,9 +142,9 @@ class RealTimeProcessor:
             import soundfile as sf
             import librosa
             
-                # Load audio file
-                audio_signal, sample_rate = sf.read(audio_path)
-                
+            # Load audio file
+            audio_signal, sample_rate = sf.read(audio_path)
+            
             # Handle mono/stereo
             if len(audio_signal.shape) > 1:
                 audio_signal = audio_signal[:, 0]  # Take first channel if stereo
@@ -164,9 +164,9 @@ class RealTimeProcessor:
                 import noisereduce as nr
                 logger.info("Applying noise reduction")
                 audio_signal = nr.reduce_noise(y=audio_signal, sr=sample_rate)
-                
+            
             # Save processed audio
-                processed_path = audio_path.replace('.wav', '_enhanced.wav')
+            processed_path = audio_path.replace('.wav', '_enhanced.wav')
             sf.write(processed_path, audio_signal, sample_rate)
             logger.info(f"Saved processed audio to {processed_path}")
             
@@ -289,7 +289,7 @@ class RealTimeProcessor:
                     self.speaker_ids_list.append(speaker_id)
                     return speaker_id
             
-            # Fallback to similarity matching
+            # Fallback to similarity matching if clustering not ready
             best_match = None
             best_score = -1
             
@@ -320,225 +320,232 @@ class RealTimeProcessor:
 
     def _process_segment(self, segment: dict) -> Optional[DiarizationResult]:
         """
-        Process a single diarization segment.
+        Process a single audio segment.
         
         Args:
-            segment: Diarization segment dictionary
+            segment: Dictionary containing segment information
             
         Returns:
             DiarizationResult if successful, None otherwise
         """
         try:
-            # Extract segment info
-            start_time = segment['start']
-            end_time = segment['end']
-            speaker_id = segment['speaker']
+            # Extract audio segment
+            audio_segment = segment['audio']
+            sample_rate = segment['sample_rate']
             
             # Get speaker embedding
-            embedding, confidence = self._get_speaker_embedding(
-                segment['audio_path'],
-                segment['sample_rate']
-            )
-            
+            embedding, confidence = self._get_speaker_embedding(audio_segment, sample_rate)
             if embedding is None:
                 return None
-            
+                
             # Find matching speaker
-            matched_speaker = self._find_matching_speaker(embedding)
+            speaker_id = self._find_matching_speaker(embedding)
             
-            # Transcribe segment
-            transcript = self.asr_model.transcribe(
-                segment['audio_path'],
-                start=start_time,
-                end=end_time
-            )['text']
-            
-            return DiarizationResult(
-                speaker_id=matched_speaker,
-                start_time=start_time,
-                end_time=end_time,
-                transcript=transcript,
+            # Create result
+            result = DiarizationResult(
+                speaker_id=speaker_id,
+                start_time=segment['start_time'],
+                end_time=segment['end_time'],
+                transcript=segment.get('transcript', ''),
                 confidence=confidence,
                 speaker_embedding=embedding,
                 speaker_confidence=confidence
             )
+            
+            return result
             
         except Exception as e:
             logger.error(f"Error processing segment: {str(e)}")
             return None
 
     def start_processing(self):
-        """Start processing thread"""
+        """Start the processing thread"""
         self.is_processing = True
         import threading
         self.processing_thread = threading.Thread(target=self._process_queue)
         self.processing_thread.start()
 
     def stop_processing(self):
-        """Stop processing thread"""
+        """Stop the processing thread"""
         self.is_processing = False
         if self.processing_thread:
             self.processing_thread.join()
 
     def _process_queue(self):
-        """Process items in queue"""
+        """Process queued audio segments"""
         while self.is_processing:
             if self.processing_queue:
-                item = self.processing_queue.pop(0)
-                self.process_audio(**item)
-            import time
-            time.sleep(0.1)
+                segment = self.processing_queue.pop(0)
+                result = self._process_segment(segment)
+                if result:
+                    self.result_callback(result)
+            else:
+                import time
+                time.sleep(0.1)  # Sleep to prevent busy waiting
 
     def process_audio(self, audio_path: str, callback: Callable[[DiarizationResult], None], num_speakers: Optional[int] = None):
-        """Process audio file for speaker diarization"""
+        """
+        Process audio file and call callback with results.
+        
+        Args:
+            audio_path: Path to audio file
+            callback: Function to call with results
+            num_speakers: Optional number of speakers to detect
+        """
         try:
-            # Increment conversation index
-            self.conversation_index += 1
-            logger.info(f"Starting conversation {self.conversation_index}")
-            
             # Preprocess audio
-            processed_path = self._preprocess_audio(audio_path)
-            logger.info(f"Preprocessed audio saved to: {processed_path}")
+            processed_audio = self._preprocess_audio(audio_path)
             
-            # Load audio for diarization
-            import soundfile as sf
-            audio, sample_rate = sf.read(processed_path)
-            logger.info(f"Loaded audio: {audio.shape}, {sample_rate}Hz")
+            # Run diarization
+            diarization = self.diarization_pipeline(processed_audio, num_speakers=num_speakers)
             
-            # Convert audio to PyAnnote format (channel, time)
-            if len(audio.shape) == 1:
-                # Mono audio - add channel dimension
-                audio = audio[np.newaxis, :]
-            elif len(audio.shape) == 2:
-                # Stereo audio - convert to mono and add channel dimension
-                audio = audio.mean(axis=1)[np.newaxis, :]
-            
-            # Convert to torch tensor
-            waveform = torch.from_numpy(audio).float()
-            
-            # Run diarization pipeline
-            logger.info("Running diarization pipeline...")
-            diarization = self.diarization_pipeline({
-                "waveform": waveform,
-                "sample_rate": sample_rate,
-                "uri": "stream"
-            })
-            
-            # Collect all segments first
-            segments = []
-            for segment, track, speaker in diarization.itertracks(yield_label=True):
-                start_time = segment.start
-                end_time = segment.end
+            # Process results
+            for turn, _, speaker in diarization.itertracks(yield_label=True):
+                # Create segment
+                segment = {
+                    'audio_path': processed_audio,
+                    'sample_rate': 16000,
+                    'start_time': turn.start,
+                    'end_time': turn.end,
+                    'speaker_id': speaker
+                }
                 
-                # Skip very short segments
-                if end_time - start_time < 0.5:
-                    logger.warning(f"Skipping short segment: {start_time:.2f}-{end_time:.2f}")
-                    continue
-                
-                # Extract audio segment
-                start_sample = int(start_time * sample_rate)
-                end_sample = int(end_time * sample_rate)
-                audio_segment = audio[0, start_sample:end_sample]  # Take first channel
-                
-                segments.append({
-                    'audio': audio_segment,
-                    'start_time': start_time,
-                    'end_time': end_time,
-                    'speaker': speaker,
-                    'sample_rate': sample_rate
-                })
-            
-            logger.info(f"Found {len(segments)} segments")
-            
-            # Process segments in batches
-            batch_size = 8
-            for i in range(0, len(segments), batch_size):
-                batch = segments[i:i + batch_size]
-                logger.info(f"Processing batch {i//batch_size + 1}/{(len(segments)-1)//batch_size + 1}")
-                
-                # Get embeddings for batch
-                embeddings = []
-                confidences = []
-                for segment in batch:
-                    embedding, confidence = self._get_speaker_embedding(segment['audio'], segment['sample_rate'])
-                    embeddings.append(embedding)
-                    confidences.append(confidence)
-                
-                # Process each segment in batch
-                for segment, embedding, confidence in zip(batch, embeddings, confidences):
-                    if embedding is not None:
-                        try:
-                            # Save segment to temporary file for transcription
-                            temp_path = f"temp_segment_{segment['start_time']:.2f}_{segment['end_time']:.2f}.wav"
-                            sf.write(temp_path, segment['audio'], segment['sample_rate'])
-                            logger.info(f"Saved temp segment to {temp_path}")
-                            
-                            # Transcribe with Whisper
-                            logger.info(f"Transcribing segment {segment['start_time']:.2f}-{segment['end_time']:.2f}")
-                            transcript_result = self.asr_model.transcribe(temp_path)
-                            transcript = transcript_result['text'].strip()
-                            logger.info(f"Transcript: {transcript}")
-                            
-                            # Clean up temporary file
-                            os.remove(temp_path)
-                            
-                            # Create result
-                            result = DiarizationResult(
-                                speaker_id=segment['speaker'],
-                                start_time=segment['start_time'],
-                                end_time=segment['end_time'],
-                                transcript=transcript,
-                                confidence=confidence,
-                                speaker_confidence=confidence,
-                                speaker_embedding=embedding
-                            )
-                            
-                            # Call callback
+                # Process segment
+                result = self._process_segment(segment)
+                if result:
                     callback(result)
-                            
-                            # Update speaker embeddings and save to JSON
-                            self.speaker_embeddings[segment['speaker']] = embedding
-                            self.context_manager.update_context(
-                                speaker_id=segment['speaker'],
-                                start_time=segment['start_time'],
-                                end_time=segment['end_time'],
-                                confidence=confidence,
-                                transcript=transcript,
-                                embedding=embedding.tolist(),  # Convert numpy array to list for JSON serialization
-                                conversation_index=self.conversation_index  # Add conversation index
-                            )
-                            logger.info(f"Updated context for speaker {segment['speaker']} in conversation {self.conversation_index}")
-                            
-                        except Exception as e:
-                            logger.error(f"Error processing segment: {str(e)}")
-                            logger.error(f"Traceback: {traceback.format_exc()}")
-                    else:
-                        logger.warning(f"Failed to process segment for speaker {segment['speaker']}")
-                
-            # Save contexts after processing all segments
-            self.context_manager.save()
-            logger.info("Saved all speaker contexts")
-            
+                    
         except Exception as e:
             logger.error(f"Error processing audio: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
 
     def get_speaker_history(self, speaker_id: str) -> List[Dict]:
-        """Get speaker history"""
+        """Get conversation history for a speaker"""
         return self.context_manager.get_speaker_history(speaker_id)
 
     def get_speaker_stats(self, speaker_id: str) -> Dict:
-        """Get speaker statistics"""
+        """Get statistics for a speaker"""
         return self.context_manager.get_speaker_stats(speaker_id)
 
     def save_contexts(self, filepath: str):
-        """Save speaker contexts"""
-        self.context_manager.export_contexts(filepath)
+        """Save speaker contexts to file"""
+        self.context_manager.save_contexts(filepath)
 
     def load_contexts(self, filepath: str):
-        """Load speaker contexts"""
-        self.context_manager.import_contexts(filepath)
+        """Load speaker contexts from file"""
+        self.context_manager.load_contexts(filepath)
         self._load_speaker_embeddings()
+
+    def result_callback(self, result: DiarizationResult):
+        """
+        Callback function for processing results.
+        Override this in subclasses to handle results.
+        
+        Args:
+            result: DiarizationResult object
+        """
+        logger.info(f"Processed segment for speaker {result.speaker_id}")
+        logger.info(f"Time: {result.start_time:.2f} - {result.end_time:.2f}")
+        if result.transcript:
+            logger.info(f"Transcript: {result.transcript}")
+
+def diarize_speech(audio_file: str) -> List[DiarizationResult]:
+    """
+    Perform speaker diarization on an audio file.
+    
+    Args:
+        audio_file: Path to audio file
+        
+    Returns:
+        List of DiarizationResult objects
+    """
+    try:
+        # Initialize processor
+        processor = RealTimeProcessor()
+        
+        # Preprocess audio
+        processed_audio = processor._preprocess_audio(audio_file)
+        
+        # Load audio
+        import soundfile as sf
+        audio_data, sample_rate = sf.read(processed_audio)
+        
+        # Run diarization
+        diarization = processor.diarization_pipeline(processed_audio)
+        
+        # Process results
+        results = []
+        for turn, _, speaker in diarization.itertracks(yield_label=True):
+            # Extract audio segment
+            start_sample = int(turn.start * sample_rate)
+            end_sample = int(turn.end * sample_rate)
+            segment_audio = audio_data[start_sample:end_sample]
+            
+            # Create segment
+            segment = {
+                'audio': segment_audio,
+                'sample_rate': sample_rate,
+                'start_time': turn.start,
+                'end_time': turn.end,
+                'speaker_id': speaker
+            }
+            
+            # Process segment
+            result = processor._process_segment(segment)
+            if result:
+                results.append(result)
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error in diarize_speech: {str(e)}")
+        raise
+
+def combine_diarization_with_transcript(
+    diarization_results: List[DiarizationResult],
+    transcript: str,
+    word_timestamps: List[Tuple[str, float, float]]
+) -> List[DiarizationResult]:
+    """
+    Combine diarization results with transcript and word timestamps.
+    
+    Args:
+        diarization_results: List of DiarizationResult objects
+        transcript: Full transcript text
+        word_timestamps: List of (word, start_time, end_time) tuples
+        
+    Returns:
+        List of DiarizationResult objects with transcripts
+    """
+    try:
+        # Sort diarization results by start time
+        diarization_results.sort(key=lambda x: x.start_time)
+        
+        # Assign words to segments
+        current_segment_idx = 0
+        current_segment = diarization_results[current_segment_idx]
+        segment_transcript = []
+        
+        for word, start_time, end_time in word_timestamps:
+            # Find appropriate segment
+            while (current_segment_idx < len(diarization_results) - 1 and
+                   end_time > diarization_results[current_segment_idx + 1].start_time):
+                current_segment_idx += 1
+                current_segment = diarization_results[current_segment_idx]
+                segment_transcript = []
+            
+            # Add word to current segment
+            if start_time >= current_segment.start_time and end_time <= current_segment.end_time:
+                segment_transcript.append(word)
+            
+            # Update segment transcript
+            current_segment.transcript = ' '.join(segment_transcript)
+        
+        return diarization_results
+        
+    except Exception as e:
+        logger.error(f"Error combining diarization with transcript: {str(e)}")
+        raise
 
 # Example usage:
 if __name__ == "__main__":
