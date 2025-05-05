@@ -26,6 +26,7 @@ ament_python_install_package(${PROJECT_NAME})
 install(PROGRAMS
   scripts/audio_processor_node.py
   scripts/face_detection_node.py
+  scripts/movement_controller_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
