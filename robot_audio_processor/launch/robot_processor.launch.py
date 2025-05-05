@@ -33,17 +33,24 @@ def generate_launch_description():
     # Get the virtual environment path
     venv_path = os.path.join(os.path.expanduser('~'), 'bwi_ros2', 'src', 'venv')
     
-    # Launch the audio processor node with HF_TOKEN and venv
+    # Set up environment variables
+    env_vars = {
+        'HF_TOKEN': hf_token,
+        'PYTHONPATH': f"{venv_path}/lib/python3.10/site-packages:{os.environ.get('PYTHONPATH', '')}",
+        'PATH': f"{venv_path}/bin:{os.environ.get('PATH', '')}",
+        'LD_LIBRARY_PATH': f"/opt/ros/humble/lib:{os.environ.get('LD_LIBRARY_PATH', '')}",
+        'ROS_VERSION': '2',
+        'ROS_PYTHON_VERSION': '3',
+        'ROS_DISTRO': 'humble'
+    }
+    
+    # Launch the audio processor node with environment variables
     audio_node = Node(
         package='robot_audio_processor',
         executable='audio_processor_node.py',
         name='audio_processor_node',
         output='screen',
-        env={
-            'HF_TOKEN': hf_token,
-            'PYTHONPATH': f"{venv_path}/lib/python3.10/site-packages:{os.environ.get('PYTHONPATH', '')}",
-            'PATH': f"{venv_path}/bin:{os.environ.get('PATH', '')}"
-        }
+        env=env_vars
     )
     
     # Launch the face detection node only if use_kinect is true
@@ -53,11 +60,7 @@ def generate_launch_description():
         name='face_detection_node',
         output='screen',
         condition=IfCondition(LaunchConfiguration('use_kinect')),
-        env={
-            'HF_TOKEN': hf_token,
-            'PYTHONPATH': f"{venv_path}/lib/python3.10/site-packages:{os.environ.get('PYTHONPATH', '')}",
-            'PATH': f"{venv_path}/bin:{os.environ.get('PATH', '')}"
-        }
+        env=env_vars
     )
     
     # Launch the movement controller node
@@ -66,10 +69,7 @@ def generate_launch_description():
         executable='movement_controller_node.py',
         name='movement_controller_node',
         output='screen',
-        env={
-            'PYTHONPATH': f"{venv_path}/lib/python3.10/site-packages:{os.environ.get('PYTHONPATH', '')}",
-            'PATH': f"{venv_path}/bin:{os.environ.get('PATH', '')}"
-        }
+        env=env_vars
     )
     
     return LaunchDescription([
