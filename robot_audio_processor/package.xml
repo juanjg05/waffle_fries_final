@@ -4,7 +4,7 @@
   <name>robot_audio_processor</name>
   <version>0.0.1</version>
   <description>Audio processing and robot control package</description>
-  <maintainer email="your.email@example.com">Your Name</maintainer>
+  <maintainer email="juanjgarcia05@gmail.com">juanjg05</maintainer>
   <license>Apache License 2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
@@ -21,6 +21,9 @@
   <exec_depend>python3-torch</exec_depend>
   <exec_depend>python3-mediapipe</exec_depend>
   <exec_depend>python3-scikit-learn</exec_depend>
+  <exec_depend>python3-cython</exec_depend>
+  <exec_depend>python3-pytorch-lightning</exec_depend>
+  <exec_depend>python3-sentencepiece</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
