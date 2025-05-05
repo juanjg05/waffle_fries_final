@@ -34,16 +34,22 @@ def generate_launch_description():
     venv_path = os.path.join(os.path.expanduser('~'), 'bwi_ros2', 'src', 'venv')
     python_executable = os.path.join(venv_path, 'bin', 'python3')
     
+    # Get the current PYTHONPATH
+    current_pythonpath = os.environ.get('PYTHONPATH', '')
+    
     # Set up environment variables
     env_vars = {
         'HF_TOKEN': hf_token,
-        'PYTHONPATH': f"{venv_path}/lib/python3.10/site-packages:/opt/ros/humble/lib/python3.10/site-packages:{os.environ.get('PYTHONPATH', '')}",
+        # Prioritize virtual environment packages
+        'PYTHONPATH': f"{venv_path}/lib/python3.10/site-packages:{current_pythonpath}",
         'PATH': f"{venv_path}/bin:{os.environ.get('PATH', '')}",
         'LD_LIBRARY_PATH': f"/opt/ros/humble/lib:{os.environ.get('LD_LIBRARY_PATH', '')}",
         'ROS_VERSION': '2',
         'ROS_PYTHON_VERSION': '3',
         'ROS_DISTRO': 'humble',
-        'PYTHONHOME': venv_path
+        # Add these to ensure proper Python package loading
+        'PYTHONUNBUFFERED': '1',
+        'PYTHONIOENCODING': 'utf-8'
     }
     
     # Launch the audio processor node with environment variables
