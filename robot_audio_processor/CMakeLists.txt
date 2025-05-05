@@ -12,21 +12,25 @@ endif()
 
 # Find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(cv_bridge REQUIRED)
+find_package(audio_common_msgs REQUIRED)
 
 # Install Python modules
 ament_python_install_package(${PROJECT_NAME})
 
-# Install Python executables
+# Install Python scripts
 install(PROGRAMS
   scripts/audio_processor_node.py
   scripts/face_detection_node.py
   scripts/movement_controller_node.py
+  scripts/analyze_spoken_to.py
+  scripts/analyze_speaker_contexts.py
+  scripts/export_contexts.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

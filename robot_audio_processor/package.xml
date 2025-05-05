@@ -17,6 +17,11 @@
   <depend>sensor_msgs</depend>
   <depend>audio_common_msgs</depend>
 
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-whisper</exec_depend>
+  <exec_depend>python3-torch</exec_depend>
+  <exec_depend>python3-mediapipe</exec_depend>
+
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 
