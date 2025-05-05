@@ -1,8 +1,8 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, SetEnvironmentVariable
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, EnvironmentVariable
+from launch.substitutions import LaunchConfiguration
 from launch.conditions import IfCondition
 from ament_index_python.packages import get_package_share_directory
 import os
@@ -18,12 +18,6 @@ def generate_launch_description():
         description='Whether to use the Azure Kinect camera'
     )
     
-    # Set up Hugging Face token environment variable
-    hf_token = SetEnvironmentVariable(
-        'HF_TOKEN',
-        EnvironmentVariable('HF_TOKEN', default_value='')
-    )
-    
     # Include the Azure Kinect launch file only if use_kinect is true
     kinect_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
@@ -33,13 +27,16 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('use_kinect'))
     )
     
+    # Get HF_TOKEN from environment
+    hf_token = os.environ.get('HF_TOKEN', '')
+    
     # Launch the audio processor node with HF_TOKEN
     audio_node = Node(
         package='robot_audio_processor',
         executable='audio_processor_node.py',
         name='audio_processor_node',
         output='screen',
-        env={'HF_TOKEN': EnvironmentVariable('HF_TOKEN', default_value='')}
+        env={'HF_TOKEN': hf_token}
     )
     
     # Launch the face detection node only if use_kinect is true
@@ -49,7 +46,7 @@ def generate_launch_description():
         name='face_detection_node',
         output='screen',
         condition=IfCondition(LaunchConfiguration('use_kinect')),
-        env={'HF_TOKEN': EnvironmentVariable('HF_TOKEN', default_value='')}
+        env={'HF_TOKEN': hf_token}
     )
     
     # Launch the movement controller node
@@ -62,7 +59,6 @@ def generate_launch_description():
     
     return LaunchDescription([
         use_kinect,
-        hf_token,
         kinect_launch,
         audio_node,
         face_node,
