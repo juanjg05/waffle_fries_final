@@ -4,7 +4,7 @@ from typing import List, Dict, Optional, Tuple, Callable
 import logging
 from datetime import datetime
 import os
-from utils.speaker_context_manager import SpeakerContextManager
+from robot_audio_processor.utils.speaker_context_manager import SpeakerContextManager
 from scipy.spatial.distance import cosine
 from sklearn.preprocessing import normalize
 import whisper
