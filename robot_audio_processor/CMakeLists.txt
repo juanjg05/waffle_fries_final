@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.8)
 project(robot_audio_processor)
 
+# Set Python interpreter path
+set(PYTHON_EXECUTABLE "/home/10_fri/bwi_ros2/src/venv/bin/python")
+
 # Default to C++14
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 14)
