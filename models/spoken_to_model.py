@@ -7,12 +7,6 @@ from enum import Enum
 import cv2
 import mediapipe as mp
 import math
-import rclpy
-from rclpy.node import Node
-from sensor_msgs.msg import Image, CompressedImage
-from geometry_msgs.msg import Twist
-from std_msgs.msg import Float32
-import cv_bridge
 import time
 from collections import defaultdict
 
@@ -44,25 +38,23 @@ class SpokenToResult:
     face_angle: Optional[float] = None  # Angle of face relative to camera
     audio_angle: Optional[float] = None  # Angle of audio source
 
-class SpokenToModel(Node):
+class SpokenToModel:
     def __init__(self, 
-                 face_direction_threshold: float = 0.7,  # Threshold for considering face as towards robot
+                 face_direction_threshold: float = 0.7,  # Threshold for considering face as towards camera
                  min_speaker_confidence: float = 0.6,    # Minimum confidence for speaker detection
                  min_speaker_duration: float = 0.5,      # Minimum duration for speaker segment
                  face_angle_threshold: float = 30.0,     # Maximum angle (degrees) to consider face as towards
                  speaker_timeout: float = 60.0):         # Timeout in seconds for removing inactive speakers
         """
-        Initialize the Spoken-to model.
+        Initialize the Spoken-to model for laptop usage.
         
         Args:
-            face_direction_threshold: Threshold for considering face as towards robot
+            face_direction_threshold: Threshold for considering face as towards camera
             min_speaker_confidence: Minimum confidence for speaker detection
             min_speaker_duration: Minimum duration for speaker segment
             face_angle_threshold: Maximum angle (degrees) to consider face as towards
             speaker_timeout: Timeout in seconds for removing inactive speakers
         """
-        super().__init__('spoken_to_model')
-        
         self.face_direction_threshold = face_direction_threshold
         self.min_speaker_confidence = min_speaker_confidence
         self.min_speaker_duration = min_speaker_duration
@@ -78,32 +70,6 @@ class SpokenToModel(Node):
             min_tracking_confidence=0.5
         )
         
-        # Initialize ROS2 components
-        self.bridge = cv_bridge.CvBridge()
-        
-        # Subscribe to Azure Kinect camera
-        self.camera_sub = self.create_subscription(
-            Image,
-            '/k4a/rgb/image_raw',  # Azure Kinect RGB topic
-            self.camera_callback,
-            10
-        )
-        
-        # Subscribe to audio direction
-        self.audio_sub = self.create_subscription(
-            Float32,
-            '/k4a/audio_direction',  # Azure Kinect audio direction topic
-            self.audio_callback,
-            10
-        )
-        
-        # Publisher for robot movement
-        self.cmd_vel_pub = self.create_publisher(
-            Twist,
-            '/cmd_vel',  # Standard ROS2 cmd_vel topic
-            10
-        )
-        
         # Store latest audio direction
         self.latest_audio_angle = None
         self.audio_confidence = 0.0
@@ -112,7 +78,7 @@ class SpokenToModel(Node):
         self.active_speakers = {}  # Dict[str, Speaker]
         self.last_cleanup_time = time.time()
         
-        logger.info("Initialized Spoken-to model with face and audio detection")
+        logger.info("Initialized Spoken-to model with face detection for laptop usage")
     
     def _cleanup_inactive_speakers(self):
         """Remove speakers that haven't been seen in a while."""
@@ -155,150 +121,95 @@ class SpokenToModel(Node):
             )
             logger.info(f"Added new speaker {speaker_id}")
     
-    def audio_callback(self, msg: Float32):
+    def process_frame(self, frame: np.ndarray):
         """
-        Process incoming audio direction messages.
+        Process a video frame to detect face direction.
         
         Args:
-            msg: ROS2 Float32 message containing audio direction angle
-        """
-        try:
-            # Store the latest audio direction
-            self.latest_audio_angle = msg.data
-            self.audio_confidence = 0.9  # High confidence for audio direction
+            frame: Video frame as numpy array
             
-            # If we have a valid audio direction, turn towards it
-            if self.latest_audio_angle is not None:
-                self.turn_towards_speaker(self.latest_audio_angle)
-            
-        except Exception as e:
-            logger.error(f"Error in audio callback: {str(e)}")
-    
-    def camera_callback(self, msg: Image):
+        Returns:
+            Tuple containing face direction, confidence, and face angle
         """
-        Process incoming camera images.
+        face_direction, confidence, face_angle = self.detect_face_direction(frame)
         
-        Args:
-            msg: ROS2 Image message from Azure Kinect
-        """
-        try:
-            # Convert ROS2 image to OpenCV format
-            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-            
-            # Detect face direction
-            face_direction, confidence, face_angle = self.detect_face_direction(cv_image)
-            
-            # Update speaker tracking
-            if face_direction != FaceDirection.UNKNOWN:
-                # For now, use a simple ID based on face position
-                speaker_id = f"speaker_{int(face_angle) if face_angle is not None else 0}"
-                self._update_speaker(speaker_id, face_direction, face_angle, confidence)
-            
-            # Clean up inactive speakers
-            self._cleanup_inactive_speakers()
-            
-            # If face is detected and at an angle, and we don't have audio direction,
-            # use face direction to turn
-            if (face_direction == FaceDirection.TOWARDS and 
-                face_angle is not None and 
-                self.latest_audio_angle is None):
-                if abs(face_angle) > 5.0:  # 5 degree threshold for turning
-                    self.turn_towards_speaker(face_angle)
-            
-        except Exception as e:
-            logger.error(f"Error in camera callback: {str(e)}")
+        # Update speaker tracking
+        if face_direction != FaceDirection.UNKNOWN:
+            # For now, use a simple ID based on face position
+            speaker_id = f"speaker_{int(face_angle) if face_angle is not None else 0}"
+            self._update_speaker(speaker_id, face_direction, face_angle, confidence)
+        
+        # Clean up inactive speakers
+        self._cleanup_inactive_speakers()
+        
+        return face_direction, confidence, face_angle
     
     def _calculate_face_angle(self, landmarks) -> float:
         """
         Calculate the angle of the face relative to the camera.
         
         Args:
-            landmarks: MediaPipe face landmarks
+            landmarks: Face mesh landmarks from MediaPipe
             
         Returns:
-            Angle in degrees (0 = facing camera, positive = turned right, negative = turned left)
+            float: Angle in degrees (0 = facing camera, positive = turned right, negative = turned left)
         """
-        try:
-            # Get nose tip and face center points
-            nose_tip = landmarks[1]  # Nose tip landmark
-            left_eye = landmarks[33]  # Left eye landmark
-            right_eye = landmarks[263]  # Right eye landmark
-            
-            # Calculate face center
-            face_center_x = (left_eye.x + right_eye.x) / 2
-            face_center_y = (left_eye.y + right_eye.y) / 2
-            
-            # Calculate angle between nose tip and face center
-            dx = nose_tip.x - face_center_x
-            dy = nose_tip.y - face_center_y
-            angle = math.degrees(math.atan2(dy, dx))
-            
-            return angle
-        except Exception as e:
-            logger.error(f"Error calculating face angle: {str(e)}")
-            return 0.0
+        # Get nose point
+        nose_point = landmarks[4]
+        
+        # Get points for left and right sides of face
+        left_cheek = landmarks[234]  # Left cheek
+        right_cheek = landmarks[454]  # Right cheek
+        
+        # Calculate face center point and direction vector
+        face_center_x = (left_cheek.x + right_cheek.x) / 2
+        face_center_y = (left_cheek.y + right_cheek.y) / 2
+        
+        # Calculate face direction vector
+        direction_vector = (nose_point.x - face_center_x, nose_point.y - face_center_y)
+        
+        # Calculate angle (in radians)
+        angle_rad = math.atan2(direction_vector[0], direction_vector[1])
+        
+        # Convert to degrees and normalize
+        angle_deg = angle_rad * 180 / math.pi
+        
+        return angle_deg
     
     def detect_face_direction(self, image: np.ndarray) -> Tuple[FaceDirection, float, Optional[float]]:
         """
-        Detect if a face is facing towards or away from the robot.
+        Detect if a face is looking toward or away from the camera.
         
         Args:
-            image: RGB image containing the face
+            image: Input image as numpy array
             
         Returns:
-            Tuple of (FaceDirection, confidence, face_angle)
+            Tuple[FaceDirection, float, Optional[float]]: Direction, confidence, and face angle (if available)
         """
         try:
-            # Use MediaPipe for face detection
+            # Convert to RGB for MediaPipe
             image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            
+            # Process the image
             results = self.face_mesh.process(image_rgb)
             
             if not results.multi_face_landmarks:
                 return FaceDirection.UNKNOWN, 0.0, None
-            
-            # Get landmarks for the first face
-            landmarks = results.multi_face_landmarks[0].landmark
+                
+            face_landmarks = results.multi_face_landmarks[0].landmark
             
             # Calculate face angle
-            face_angle = self._calculate_face_angle(landmarks)
+            face_angle = self._calculate_face_angle(face_landmarks)
             
             # Determine face direction based on angle
-            if abs(face_angle) <= self.face_angle_threshold:
+            if abs(face_angle) < self.face_angle_threshold:
                 return FaceDirection.TOWARDS, 0.9, face_angle
             else:
-                return FaceDirection.AWAY, 0.9, face_angle
+                return FaceDirection.AWAY, 0.8, face_angle
                 
         except Exception as e:
-            logger.error(f"Error in face direction detection: {str(e)}")
+            logger.error(f"Error detecting face direction: {str(e)}")
             return FaceDirection.UNKNOWN, 0.0, None
-    
-    def turn_towards_speaker(self, angle: float) -> bool:
-        """
-        Turn the robot towards the speaker.
-        
-        Args:
-            angle: Angle of the speaker relative to the robot (degrees)
-            
-        Returns:
-            True if turn was successful, False otherwise
-        """
-        try:
-            # Create Twist message for robot movement
-            cmd = Twist()
-            
-            # Set angular velocity based on angle
-            # Negative angle means turn left, positive means turn right
-            cmd.angular.z = -angle * 0.1  # Scale factor for smooth turning
-            
-            # Publish command
-            self.cmd_vel_pub.publish(cmd)
-            
-            logger.info(f"Turning to angle {angle} degrees")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error turning towards speaker: {str(e)}")
-            return False
     
     def is_spoken_to(self, 
                     speaker_count: int,
@@ -307,86 +218,99 @@ class SpokenToModel(Node):
                     face_confidence: float = 0.0,
                     face_angle: Optional[float] = None) -> SpokenToResult:
         """
-        Determine if the robot is being spoken to based on speaker count and face direction.
+        Determine if the user is being spoken to based on available data.
         
         Args:
-            speaker_count: Number of speakers detected
-            active_speaker_id: ID of the currently active speaker
-            face_direction: Direction the face is pointing
-            face_confidence: Confidence of face direction detection
+            speaker_count: Number of speakers in the current segment
+            active_speaker_id: ID of the active speaker, if known
+            face_direction: Direction the face is pointing, if detected
+            face_confidence: Confidence in the face direction detection
             face_angle: Angle of the face relative to the camera
             
         Returns:
-            SpokenToResult with decision and explanation
+            SpokenToResult: Result with spoken-to analysis
         """
-        try:
-            # If only one speaker, they are likely speaking to the robot
-            if speaker_count == 1:
-                return SpokenToResult(
-                    is_spoken_to=True,
-                    confidence=0.9,
-                    face_direction=face_direction or FaceDirection.UNKNOWN,
-                    speaker_count=speaker_count,
-                    active_speaker_id=active_speaker_id,
-                    explanation="Single speaker detected - likely speaking to robot",
-                    face_angle=face_angle
-                )
+        # Default result
+        result = SpokenToResult(
+            is_spoken_to=False,
+            confidence=0.5,
+            face_direction=FaceDirection.UNKNOWN if face_direction is None else face_direction,
+            speaker_count=speaker_count,
+            active_speaker_id=active_speaker_id,
+            face_angle=face_angle,
+            audio_angle=self.latest_audio_angle
+        )
+        
+        # Simple case: if we have only one speaker, they're likely speaking to the user
+        if speaker_count == 1:
+            result.is_spoken_to = True
+            result.confidence = 0.8
+            result.explanation = "Only one speaker detected"
+            return result
             
-            # If multiple speakers, check face direction
-            if face_direction == FaceDirection.TOWARDS and face_confidence >= self.face_direction_threshold:
-                # If face is towards but at an angle, try to turn towards speaker
-                if face_angle is not None and abs(face_angle) > 5.0:  # 5 degree threshold for turning
-                    self.turn_towards_speaker(face_angle)
-                
-                return SpokenToResult(
-                    is_spoken_to=True,
-                    confidence=face_confidence,
-                    face_direction=face_direction,
-                    speaker_count=speaker_count,
-                    active_speaker_id=active_speaker_id,
-                    explanation="Face is directed towards robot",
-                    face_angle=face_angle
-                )
-            elif face_direction == FaceDirection.AWAY:
-                return SpokenToResult(
-                    is_spoken_to=False,
-                    confidence=face_confidence,
-                    face_direction=face_direction,
-                    speaker_count=speaker_count,
-                    active_speaker_id=active_speaker_id,
-                    explanation="Face is directed away from robot",
-                    face_angle=face_angle
-                )
+        # If we have face direction information
+        if face_direction is not None and face_confidence >= self.min_speaker_confidence:
+            if face_direction == FaceDirection.TOWARDS:
+                result.is_spoken_to = True
+                result.confidence = face_confidence
+                result.explanation = "Face is directed towards camera"
             else:
-                # If face direction is unknown or confidence is low
-                return SpokenToResult(
-                    is_spoken_to=False,
-                    confidence=0.5,
-                    face_direction=face_direction or FaceDirection.UNKNOWN,
-                    speaker_count=speaker_count,
-                    active_speaker_id=active_speaker_id,
-                    explanation="Cannot determine if robot is being spoken to",
-                    face_angle=face_angle
-                )
+                result.is_spoken_to = False
+                result.confidence = face_confidence
+                result.explanation = "Face is directed away from camera"
                 
-        except Exception as e:
-            logger.error(f"Error in is_spoken_to: {str(e)}")
-            return SpokenToResult(
-                is_spoken_to=False,
-                confidence=0.0,
-                face_direction=FaceDirection.UNKNOWN,
-                speaker_count=speaker_count,
-                active_speaker_id=active_speaker_id,
-                explanation=f"Error: {str(e)}",
-                face_angle=face_angle
-            )
+            return result
+            
+        # If we have face angle information but not explicit direction
+        if face_angle is not None:
+            if abs(face_angle) < self.face_angle_threshold:
+                result.is_spoken_to = True
+                result.confidence = 0.7
+                result.explanation = f"Face angle ({face_angle:.1f}°) indicates looking at camera"
+            else:
+                result.is_spoken_to = False
+                result.confidence = 0.7
+                result.explanation = f"Face angle ({face_angle:.1f}°) indicates looking away"
+                
+            return result
+        
+        # Fallback: with multiple speakers and no other information,
+        # assume not being spoken to directly
+        result.is_spoken_to = False
+        result.confidence = 0.6
+        result.explanation = "Multiple speakers with no face direction data"
+        return result
 
-def main(args=None):
-    rclpy.init(args=args)
-    node = SpokenToModel()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+def main():
+    """Test the model with a webcam."""
+    model = SpokenToModel()
+    
+    # Open webcam
+    cap = cv2.VideoCapture(0)
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+            
+        # Process the frame
+        face_direction, confidence, face_angle = model.process_frame(frame)
+        
+        # Display result
+        if face_direction != FaceDirection.UNKNOWN:
+            cv2.putText(frame, f"{face_direction.value}: {confidence:.2f}, Angle: {face_angle:.1f}°",
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        else:
+            cv2.putText(frame, "No face detected", 
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            
+        cv2.imshow('Face Direction', frame)
+        
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+            
+    cap.release()
+    cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main() 

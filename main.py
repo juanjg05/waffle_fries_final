@@ -1,7 +1,5 @@
 from models.diarization_model import diarize_speech, combine_diarization_with_transcript, DiarizationResult
-from robot.movement import move_robot_toward_speaker
 from utils.memory import SpeakerMemory
-from robot.spatial_audio import get_speaker_direction
 import whisper
 import logging
 import os
@@ -74,34 +72,29 @@ def process_audio(
         List[Dict]: List of processed segments with speaker info
     """
     try:
-        # Step 1: Get speaker direction
-        direction_info = get_speaker_direction(audio_file)
-        logger.info(f"Speaker direction: {direction_info}")
-        
-        # Step 2: Perform diarization
+        # Step 1: Perform diarization
         diarization_results = diarize_speech(audio_file)
         logger.info(f"Found {len(diarization_results)} speaker segments")
         
-        # Step 3: Transcribe the audio
+        # Step 2: Transcribe the audio
         transcript, word_timestamps = transcribe_audio(audio_file)
         logger.info("Transcription completed")
         
-        # Step 4: Combine diarization with transcript
+        # Step 3: Combine diarization with transcript
         segments = combine_diarization_with_transcript(
             diarization_results,
             transcript,
             word_timestamps
         )
         
-        # Step 5: Process each segment
+        # Step 4: Process each segment
         processed_segments = []
         for segment in segments:
             processed_segments.append({
                 'speaker_id': segment.speaker_id,
                 'start_time': segment.start_time,
                 'end_time': segment.end_time,
-                'transcript': segment.transcript,
-                'direction': direction_info
+                'transcript': segment.transcript
             })
             
         return processed_segments
@@ -120,4 +113,3 @@ if __name__ == "__main__":
         print(f"Speaker {segment['speaker_id']}:")
         print(f"  Time: {segment['start_time']:.2f} - {segment['end_time']:.2f}")
         print(f"  Transcript: {segment['transcript']}")
-        print(f"  Direction: {segment['direction']}")
