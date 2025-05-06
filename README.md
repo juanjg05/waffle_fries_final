@@ -1,85 +1,107 @@
-# Robot Audio Processing System
+What to do? Figure it out. I'm just kidding.
 
-This system provides real-time audio processing capabilities for a robot, including:
-- Speaker diarization
-- Speech recognition
-- Speaker direction detection
-- Robot movement control
+1. Install requirements (venv???):
+   ```
+   pip install -r requirements.txt
+   ```
 
-## Installation
+2. Please create a .env file with your Hugging Face token to run PyAnnote, you may need to go and accept their rules before you are able to run the code:
+```
+HF_TOKEN=your_huggingface_token
 
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/robot-audio-processing.git
-cd robot-audio-processing
 ```
 
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+these are the links to the website...:
 
-3. Set up environment variables:
-```bash
-cp .env.example .env
-# Edit .env with your configuration
-```
 
-## Usage
+3. Run the file...:
+   ```
+   python main.py
+   ```
 
-Basic usage example:
+3. Press Enter to start recording, and Enter again to stop.
 
-```python
-from models.nemo_diarization_model import diarize_speech, combine_diarization_with_transcript
-from robot.spatial_audio import get_speaker_direction
-from utils.memory import SpeakerMemory
-
-# Initialize components
-memory = SpeakerMemory()
-
-# Process audio file
-audio_file = "path/to/audio.wav"
-
-# Get speaker direction
-direction_info = get_speaker_direction(audio_file)
-
-# Perform diarization
-diarization_results = diarize_speech(audio_file)
-
-# Process results
-for segment in diarization_results:
-    print(f"Speaker {segment.speaker_id}:")
-    print(f"  Time: {segment.start_time:.2f} - {segment.end_time:.2f}")
-    print(f"  Direction: {direction_info}")
-```
-
-## Project Structure
+## File Structures. 
 
 ```
-robot-audio-processing/
-├── models/
-│   ├── nemo_diarization_model.py
-│   └── spatial_audio.py
-├── robot/
-│   ├── movement.py
-│   └── spatial_audio.py
-├── utils/
-│   ├── memory.py
-│   └── rttm_parser.py
-├── tests/
-│   └── test_diarization.py
-├── requirements.txt
-└── README.md
+waffle_fries/
+|
+├── data/                             # Data directory
+│   ├── conversation_data/            # Processed conversations
+│   │   ├── conversation_1/           # Individual conversation folder
+│   │   │   ├── audio.wav             # Conversation audio
+│   │   │   ├── frames/               # Video frames
+│   │   │   └── results.json          # Conversation results
+│   │   └── conversation_2/           # Another conversation
+│   └── speaker_contexts/             # Speaker data
+│       ├── speaker_contexts.json     # Combined speaker data
+│       └── speaker_0/                # Individual speaker folder
+│           ├── speaker_0.json        # Speaker details
+│           ├── speaker_0_embedding.npy    # Speaker voice embedding
+│           └── speaker_0_transcript.txt   # Speaker transcripts
+├── src/                              # Source code
+│   ├── audio_video_processing/       # Main processing package
+│   │   └── scripts/                  # Processing scripts
+│   ├── models/                       # Model implementations
+│   └── utils/                        # Utility functions
+├── requirements.txt                  # Dependencies
+└── main.py                           # Entry point
 ```
 
-## Testing
+## ✨ Features
 
-Run the test suite:
+- 🗣️ **Speech Transcription** - Uses Whisper for accurate transcription
+- 👁️ **Face Angle Detection** - Determines if someone is looking at the camera
+- 👋 **Is Spoken To** - Tells if a person is being spoken to based on face angle
+- 🧠 **Speaker Recognition** - Identifies speakers across conversations
+- 📝 **Conversation History** - Maintains a record of all conversations
 
-```bash
-pytest tests/
+## 🔊 Speaker Identification
+
+The system uses voice embeddings to identify and track speakers across different conversations:
+
+1. For each audio segment, a voice embedding is extracted using either:
+   - SpeechBrain's ECAPA-TDNN model (in production environments)
+   - MFCC features as a fallback (for Windows compatibility)
+
+2. New speakers are assigned a unique ID (`speaker_0`, `speaker_1`, etc.)
+
+3. For subsequent conversations, the system:
+   - Extracts voice embeddings from new audio segments
+   - Computes the cosine similarity between these embeddings and stored speaker embeddings
+   - Assigns the existing speaker ID if similarity is above the threshold (default: 0.85) (No longer k-clustering algorithm for slower processing)
+   - Creates a new speaker ID if no match is found
+
+
+
+
+
+
+
+Please create a .env file with your Hugging Face token to run PyAnnote, you may need to go and accept their rules before you are able to run the code:
+```
+HF_TOKEN=your_huggingface_token
 ```
 
-## License
+This is the structure of our outputs:
 
-MIT License
+1. **Conversation Results** (`data/conversation_data/conversation_X/results.json`):
+   ```json
+   {
+     "conversation_id": "conversation_1",
+     "speaker_ids": ["speaker_0", "speaker_1"],
+     "results": [
+       {
+         "speaker_id": "speaker_0",
+         "transcript": "Hello there!",
+         "is_spoken_to": true,
+         "face_angle": 12.5
+       }
+     ]
+   }
+   ```
+
+2. **Speaker Contexts** (`data/speaker_contexts/speaker_ID/speaker_ID.json`):
+   This is whats used to match speaker ID's and get context from past conversations.
+
+

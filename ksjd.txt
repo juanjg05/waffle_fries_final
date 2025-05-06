@@ -1,4 +1,0 @@
- winget install --interactive --exact dorssel.usbipd-win
-   usbipd list  # Find your webcam and microphone devices
-   usbipd bind -b 4STBV34/CNWSC00476003Z/
-   usbipd attach --wsl -b 4STBV34/CNWSC00476003Z/

@@ -1,0 +1,272 @@
+{
+  "speaker_0": {
+    "speaker_id": "speaker_0",
+    "interaction_count": 27,
+    "last_interaction_time": "2025-05-05T21:48:27.051119",
+    "common_intents": {},
+    "average_confidence": 1.0,
+    "conversation_history": [
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T20:58:27.761463",
+        "start_time": 0.0,
+        "end_time": 9.0,
+        "confidence": 1.0,
+        "transcript": " Work. Work. Work. Work."
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:01:02.371961",
+        "start_time": 0.0,
+        "end_time": 2.0,
+        "confidence": 1.0,
+        "transcript": " work"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:01:02.373960",
+        "start_time": 2.0,
+        "end_time": 4.0,
+        "confidence": 1.0,
+        "transcript": " hello"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:01:02.377965",
+        "start_time": 4.0,
+        "end_time": 6.0,
+        "confidence": 1.0,
+        "transcript": " hello"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:01:02.384529",
+        "start_time": 6.0,
+        "end_time": 8.0,
+        "confidence": 1.0,
+        "transcript": " hello"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:01:02.390526",
+        "start_time": 8.0,
+        "end_time": 10.0,
+        "confidence": 1.0,
+        "transcript": " hello"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:01:02.395524",
+        "start_time": 10.0,
+        "end_time": 12.0,
+        "confidence": 1.0,
+        "transcript": " hello"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:13:30.281348",
+        "start_time": 0.0,
+        "end_time": 5.0,
+        "confidence": 1.0,
+        "transcript": " Hello?"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:13:30.287859",
+        "start_time": 5.0,
+        "end_time": 10.0,
+        "confidence": 1.0,
+        "transcript": " Is it me, you're looking for?"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:13:30.292665",
+        "start_time": 10.0,
+        "end_time": 13.0,
+        "confidence": 1.0,
+        "transcript": " Hello?"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:13:30.296695",
+        "start_time": 13.0,
+        "end_time": 16.0,
+        "confidence": 1.0,
+        "transcript": " Hello?"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:24:01.857021",
+        "start_time": 0.0,
+        "end_time": 7.0,
+        "confidence": 1.0,
+        "transcript": " Is this working?"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:24:01.863019",
+        "start_time": 7.0,
+        "end_time": 11.5,
+        "confidence": 1.0,
+        "transcript": " Is this working?"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:24:01.868016",
+        "start_time": 11.5,
+        "end_time": 16.5,
+        "confidence": 1.0,
+        "transcript": " Is this working?"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:24:01.873014",
+        "start_time": 16.5,
+        "end_time": 18.5,
+        "confidence": 1.0,
+        "transcript": " Who knows?"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:25:11.907563",
+        "start_time": 0.0,
+        "end_time": 6.0,
+        "confidence": 1.0,
+        "transcript": " Is this working?"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:25:11.914564",
+        "start_time": 6.0,
+        "end_time": 14.0,
+        "confidence": 1.0,
+        "transcript": " Oh, oh, oh, work."
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:25:11.917565",
+        "start_time": 15.0,
+        "end_time": 17.0,
+        "confidence": 1.0,
+        "transcript": " Work."
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:25:11.920567",
+        "start_time": 18.0,
+        "end_time": 20.0,
+        "confidence": 1.0,
+        "transcript": " Work."
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:34:17.686273",
+        "start_time": 0.0,
+        "end_time": 16.0,
+        "confidence": 1.0,
+        "transcript": " Hello? Is it me or looking for? Hello? Is it me or looking for?"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:34:17.693182",
+        "start_time": 16.0,
+        "end_time": 18.0,
+        "confidence": 1.0,
+        "transcript": " Alright."
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:40:03.024616",
+        "start_time": 0.0,
+        "end_time": 6.66,
+        "confidence": 1.0,
+        "transcript": " Amazing this I'm so glad this works now"
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:45:12.753720",
+        "start_time": 0.0,
+        "end_time": 6.0,
+        "confidence": 1.0,
+        "transcript": " Testing, testing, one, two, three."
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:45:12.760330",
+        "start_time": 6.0,
+        "end_time": 12.0,
+        "confidence": 1.0,
+        "transcript": " Testing, testing, one, two, three."
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:48:27.027170",
+        "start_time": 0.0,
+        "end_time": 5.0,
+        "confidence": 1.0,
+        "transcript": " Checking Restructured."
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:48:27.034179",
+        "start_time": 5.0,
+        "end_time": 8.0,
+        "confidence": 1.0,
+        "transcript": " Checking Restructured."
+      },
+      {
+        "conversation_index": 1,
+        "timestamp": "2025-05-05T21:48:27.040174",
+        "start_time": 8.0,
+        "end_time": 10.0,
+        "confidence": 1.0,
+        "transcript": " One, two, three."
+      }
+    ],
+    "embedding_index": 0,
+    "embedding": [
+      -0.9848695397377014,
+      0.1528078019618988,
+      0.0168764665722847,
+      0.059752143919467926,
+      0.03832484036684036,
+      0.015630166977643967,
+      0.007316709496080875,
+      -0.007513196673244238,
+      0.009784271009266376,
+      0.0010873889550566673,
+      -0.015564274974167347,
+      0.003712223842740059,
+      -0.01196084450930357,
+      0.009616082534193993,
+      0.003385475603863597,
+      0.006869213655591011,
+      0.006981982849538326,
+      -0.001238638418726623,
+      -0.006121899466961622,
+      0.002518350724130869,
+      0.003113320330157876,
+      0.004666515626013279,
+      0.008792766369879246,
+      0.005754580721259117,
+      -0.0031957104802131653,
+      0.003017574781551957,
+      -0.005357497837394476,
+      0.00022867380175739527,
+      0.0033680058550089598,
+      0.0008122629369609058,
+      0.003710018238052726,
+      -0.0003256622876506299,
+      -0.0008032756159082055,
+      -0.001875787042081356,
+      -0.003895124187693,
+      0.0009806326124817133,
+      -0.0012278077192604542,
+      0.004355171229690313,
+      0.000785904354415834,
+      0.0022624952252954245
+    ],
+    "spoken_to_count": 17,
+    "not_spoken_to_count": 0
+  }
+}
