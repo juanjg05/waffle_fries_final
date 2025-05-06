@@ -79,16 +79,20 @@ class SpeakerContextManager:
     
     def _load_individual_files(self):
         """Load individual speaker context files as fallback."""
-        for filename in os.listdir(self.storage_dir):
-            if filename.endswith('.json') and filename != "speaker_contexts.json":
-                try:
-                    with open(os.path.join(self.storage_dir, filename), 'r') as f:
-                        speaker_data = json.load(f)
-                        speaker_id = speaker_data.get('speaker_id')
-                        if speaker_id:
-                            self.speaker_data[speaker_id] = speaker_data
-                except Exception as e:
-                    logger.error(f"Failed to load speaker context {filename}: {e}")
+        for item in os.listdir(self.storage_dir):
+            item_path = os.path.join(self.storage_dir, item)
+            # Check if it's a directory for a speaker
+            if os.path.isdir(item_path) and item.startswith("speaker_"):
+                speaker_json = os.path.join(item_path, f"{item}.json")
+                if os.path.exists(speaker_json):
+                    try:
+                        with open(speaker_json, 'r') as f:
+                            speaker_data = json.load(f)
+                            speaker_id = speaker_data.get('speaker_id')
+                            if speaker_id:
+                                self.speaker_data[speaker_id] = speaker_data
+                    except Exception as e:
+                        logger.error(f"Failed to load speaker context {speaker_json}: {e}")
     
     def update_speaker(self, speaker_id: str, embedding: np.ndarray = None, 
                        transcript: str = None, is_spoken_to: bool = None,
@@ -142,20 +146,25 @@ class SpeakerContextManager:
     
     def _save_speaker(self, speaker_id: str):
         """Save speaker context to file."""
-        speaker_file = os.path.join(self.storage_dir, f"{speaker_id}.json")
+        # Create speaker directory
+        speaker_dir = os.path.join(self.storage_dir, speaker_id)
+        os.makedirs(speaker_dir, exist_ok=True)
+        
+        # Save speaker data to JSON file in the speaker's directory
+        speaker_file = os.path.join(speaker_dir, f"{speaker_id}.json")
         with open(speaker_file, 'w') as f:
             json.dump(self.speaker_data[speaker_id], f, indent=2)
         
         # Also save embedding as numpy file if available
         if 'embedding' in self.speaker_data[speaker_id] and self.speaker_data[speaker_id]['embedding']:
-            embedding_file = os.path.join(self.storage_dir, f"{speaker_id}_embedding.npy")
+            embedding_file = os.path.join(speaker_dir, f"{speaker_id}_embedding.npy")
             embedding_np = np.array(self.speaker_data[speaker_id]['embedding'])
             np.save(embedding_file, embedding_np)
             logger.debug(f"Saved speaker embedding to {embedding_file}")
         
         # Save transcript to text file
         if 'conversation_history' in self.speaker_data[speaker_id] and self.speaker_data[speaker_id]['conversation_history']:
-            transcript_file = os.path.join(self.storage_dir, f"{speaker_id}_transcript.txt")
+            transcript_file = os.path.join(speaker_dir, f"{speaker_id}_transcript.txt")
             with open(transcript_file, 'w') as f:
                 for entry in self.speaker_data[speaker_id]['conversation_history']:
                     f.write(f"{entry['timestamp']} ({entry['start_time']} - {entry['end_time']}): {entry['transcript']}\n")
@@ -203,12 +212,18 @@ class SimplifiedLaptopProcessor:
             face_angle_threshold: Threshold angle in degrees for considering if facing camera
             conversation_index: Starting index for conversation naming
         """
-        # Create output directory
+        # Create output directory structure
         self.output_dir = output_dir
-        os.makedirs(output_dir, exist_ok=True)
+        self.model_dir = model_dir
+        self.speaker_contexts_dir = speaker_contexts_dir
+        
+        # Ensure directories exist
+        os.makedirs(f"data/{output_dir}", exist_ok=True)
+        os.makedirs(f"data/{speaker_contexts_dir}", exist_ok=True)
+        os.makedirs(f"src/{model_dir}", exist_ok=True)
         
         # Initialize context manager
-        self.context_manager = SpeakerContextManager(storage_dir=speaker_contexts_dir)
+        self.context_manager = SpeakerContextManager(storage_dir=f"data/{speaker_contexts_dir}")
         
         # Audio parameters
         self.audio_format = pyaudio.paInt16
@@ -221,8 +236,11 @@ class SimplifiedLaptopProcessor:
         self.face_angle_threshold = face_angle_threshold
         self.conversation_index = conversation_index
         
-        # Look for existing conversation IDs to determine the next index
-        self._find_last_conversation_index()
+        # Look for existing conversation IDs
+        self.last_conversation_idx = self._find_last_conversation_index()
+        self.context_manager.conversation_index = self.last_conversation_idx + 1
+        
+        logger.info(f"Setting conversation index to {self.context_manager.conversation_index} based on existing files")
         
         # Initialize audio recorder
         self.pyaudio = pyaudio.PyAudio()
@@ -283,21 +301,24 @@ class SimplifiedLaptopProcessor:
     def _find_last_conversation_index(self):
         """Find the last used conversation index from existing files."""
         try:
-            # Look for conversation_X_results.json files in the output directory
-            pattern = re.compile(r'conversation_(\d+)_results\.json')
-            max_index = 0
+            max_idx = 0
+            conversations_dir = os.path.join("data", self.output_dir)
             
-            for filename in os.listdir(self.output_dir):
-                match = pattern.match(filename)
-                if match:
-                    index = int(match.group(1))
-                    max_index = max(max_index, index)
+            if os.path.exists(conversations_dir):
+                for item in os.listdir(conversations_dir):
+                    if item.startswith("conversation_"):
+                        try:
+                            # Extract the index from conversation_X format
+                            idx_part = item.split("_")[1].split("/")[0].split("\\")[0]
+                            idx = int(idx_part)
+                            max_idx = max(max_idx, idx)
+                        except (ValueError, IndexError):
+                            pass
             
-            if max_index > 0:
-                self.conversation_index = max_index + 1
-                logger.info(f"Setting conversation index to {self.conversation_index} based on existing files")
+            return max_idx
         except Exception as e:
             logger.error(f"Error finding last conversation index: {str(e)}")
+            return 0
     
     def start_recording(self):
         """Start recording audio and video."""
@@ -306,7 +327,7 @@ class SimplifiedLaptopProcessor:
             return
         
         # Generate conversation ID using index
-        self.conversation_id = f"conversation_{self.conversation_index}"
+        self.conversation_id = f"conversation_{self.context_manager.conversation_index}"
         logger.info(f"Starting recording for {self.conversation_id}")
         
         # Reset frames
@@ -456,13 +477,17 @@ class SimplifiedLaptopProcessor:
     def _process_conversation(self):
         """Process the recorded conversation."""
         try:
-            # Save audio
-            audio_filename = os.path.join(self.output_dir, f"{self.conversation_id}_audio.wav")
+            # Create conversation directory with proper structure
+            conversation_path = os.path.join("data", self.output_dir, self.conversation_id)
+            os.makedirs(conversation_path, exist_ok=True)
+            os.makedirs(os.path.join(conversation_path, "frames"), exist_ok=True)
+            
+            # Save audio to conversation directory
+            audio_filename = os.path.join(conversation_path, "audio.wav")
             self._save_audio(audio_filename)
             
-            # Save sample frames
-            frames_dir = os.path.join(self.output_dir, f"{self.conversation_id}_frames")
-            os.makedirs(frames_dir, exist_ok=True)
+            # Save sample frames to conversation directory
+            frames_dir = os.path.join(conversation_path, "frames")
             self._save_sample_frames(frames_dir)
             
             # Transcribe the audio
@@ -472,10 +497,11 @@ class SimplifiedLaptopProcessor:
             # Add face information
             self._add_face_information(transcription_results)
             
-            # Save results
-            self._save_results(transcription_results)
+            # Save results to conversation directory
+            results_file = os.path.join(conversation_path, "results.json")
+            self._save_results(transcription_results, results_file)
             
-            logger.info(f"Processing complete. Results saved to {self.output_dir}")
+            logger.info(f"Processing complete. Results saved to {conversation_path}")
         except Exception as e:
             logger.error(f"Error processing conversation: {str(e)}")
 
@@ -532,8 +558,7 @@ class SimplifiedLaptopProcessor:
 
     def _transcribe_audio(self, audio_filename) -> List[DiarizationResult]:
         """
-        Transcribe the audio and create segments.
-        Since we don't have diarization, we'll create a single speaker.
+        Transcribe the audio and create segments with speaker diarization.
         
         Args:
             audio_filename: Path to the audio file
@@ -555,9 +580,6 @@ class SimplifiedLaptopProcessor:
             logger.info(f"Loading audio file with librosa...")
             audio_data, sample_rate = librosa.load(audio_filename, sr=16000, mono=True)
             
-            # Extract a voice embedding for the audio
-            embedding = self._extract_voice_embedding(audio_data, sample_rate)
-            
             # Transcribe using Whisper
             logger.info(f"Starting whisper transcription...")
             result = self.whisper_model.transcribe(audio_data, language="en")
@@ -565,35 +587,177 @@ class SimplifiedLaptopProcessor:
             # Create segments from whisper segments
             segments = []
             
+            # Let's try to detect multiple speakers by using whisper segments with a time gap check
+            current_speaker_idx = 0
+            last_segment_end = 0
+            speaker_embeddings = {}
+            
             for i, segment in enumerate(result["segments"]):
-                # Create a diarization result for each segment
+                # Get segment time range
+                segment_start = segment["start"]
+                segment_end = segment["end"]
+                
+                # Extract audio for this segment
+                start_sample = int(segment_start * sample_rate)
+                end_sample = int(segment_end * sample_rate)
+                audio_segment = audio_data[start_sample:end_sample]
+                
+                # Extract voice embedding
+                embedding = self._extract_voice_embedding(audio_segment, sample_rate)
+                
+                # If there's a significant gap (>1.5s) between segments, consider a speaker change
+                if i > 0 and segment_start - last_segment_end > 1.5:
+                    # Increase probability of detecting a new speaker
+                    potential_new_speaker = True
+                else:
+                    potential_new_speaker = False
+                
+                # Try to match with existing speakers
+                speaker_id = self._assign_speaker_id(embedding, potential_new_speaker)
+                
+                # Store embedding for this speaker
+                if speaker_id not in speaker_embeddings:
+                    speaker_embeddings[speaker_id] = embedding
+                
+                # Create diarization result
                 diarization_result = DiarizationResult(
-                    speaker_id=f"speaker_0",  # Single speaker without diarization
-                    start_time=segment["start"],
-                    end_time=segment["end"],
-                    transcript=segment["text"],
+                    speaker_id=speaker_id,
+                    start_time=segment_start,
+                    end_time=segment_end,
+                    transcript=segment["text"].strip(),
                     confidence=segment.get("confidence", 0.9),
                     speaker_embedding=embedding,
                     speaker_confidence=0.9
                 )
                 segments.append(diarization_result)
                 
-                # Update speaker context
-                self.context_manager.update_speaker(
-                    speaker_id=diarization_result.speaker_id,
+                # Update speaker context in data/speaker_contexts/speaker_id directory
+                self._update_speaker_context(
+                    speaker_id=speaker_id,
                     embedding=embedding,
-                    transcript=diarization_result.transcript,
-                    start_time=segment["start"],
-                    end_time=segment["end"]
+                    transcript=segment["text"].strip(),
+                    start_time=segment_start,
+                    end_time=segment_end
                 )
+                
+                # Update last segment end
+                last_segment_end = segment_end
             
-            logger.info(f"Transcribed {len(segments)} segments")
+            logger.info(f"Transcribed {len(segments)} segments with {len(speaker_embeddings)} unique speakers")
             return segments
         except Exception as e:
             logger.error(f"Error in transcription: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
             return []
+
+    def _update_speaker_context(self, speaker_id, embedding, transcript=None, start_time=None, end_time=None, is_spoken_to=None):
+        """
+        Update speaker context with proper file structure
+        
+        Args:
+            speaker_id: Speaker identifier
+            embedding: Voice embedding
+            transcript: Transcript text
+            start_time: Segment start time
+            end_time: Segment end time
+            is_spoken_to: Whether the speaker is being spoken to
+        """
+        # Make sure speaker directory exists
+        speaker_dir = os.path.join("data", "speaker_contexts", speaker_id)
+        os.makedirs(speaker_dir, exist_ok=True)
+        
+        # Update speaker context
+        self.context_manager.update_speaker(
+            speaker_id=speaker_id,
+            embedding=embedding,
+            transcript=transcript,
+            start_time=start_time,
+            end_time=end_time,
+            is_spoken_to=is_spoken_to
+        )
+
+    def _assign_speaker_id(self, embedding, potential_new_speaker=False):
+        """
+        Assign a speaker ID based on embedding similarity.
+        
+        Args:
+            embedding: Voice embedding
+            potential_new_speaker: Flag indicating higher likelihood of a new speaker
+            
+        Returns:
+            Speaker ID
+        """
+        if not embedding.any():
+            return f"speaker_{len(self.context_manager.get_all_speakers())}"
+        
+        speakers = self.context_manager.get_all_speakers()
+        best_similarity = -1
+        best_speaker_id = None
+        
+        for speaker in speakers:
+            if 'embedding' in speaker and speaker['embedding']:
+                stored_embedding = np.array(speaker['embedding'])
+                if embedding.shape == stored_embedding.shape:
+                    similarity = 1 - cosine(embedding, stored_embedding)
+                    if similarity > best_similarity:
+                        best_similarity = similarity
+                        best_speaker_id = speaker['speaker_id']
+        
+        # Adjust threshold if potential new speaker is detected
+        threshold = self.similarity_threshold * 0.95 if potential_new_speaker else self.similarity_threshold
+        
+        if best_similarity > threshold and best_speaker_id:
+            return best_speaker_id
+        else:
+            # Create a new speaker ID
+            return f"speaker_{len(speakers)}"
+
+    def _save_results(self, segments, results_file=None):
+        """
+        Save the results to a JSON file.
+        
+        Args:
+            segments: List of DiarizationResult objects
+            results_file: Output file path
+        """
+        try:
+            if not segments:
+                logger.warning("No segments to save")
+                return
+                
+            # Count unique speakers
+            unique_speakers = set(segment.speaker_id for segment in segments)
+            num_speakers = len(unique_speakers)
+            
+            # Create a JSON serializable dictionary
+            segments_dict = []
+            for segment in segments:
+                segment_dict = segment.to_dict()
+                segments_dict.append(segment_dict)
+            
+            # Create conversation data structure
+            conversation_data = {
+                "conversation_id": self.conversation_id,
+                "timestamp": datetime.now().isoformat(),
+                "num_speakers": num_speakers,
+                "speaker_ids": list(unique_speakers),
+                "results": segments_dict
+            }
+            
+            # If no results file specified, use default path
+            if not results_file:
+                results_file = os.path.join("data", self.output_dir, f"{self.conversation_id}", "results.json")
+            
+            # Save to file
+            with open(results_file, 'w') as f:
+                json.dump(conversation_data, f, indent=2)
+            
+            logger.info(f"Results saved to {results_file}")
+        except Exception as e:
+            logger.error(f"Error saving results: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     def _extract_voice_embedding(self, audio_data, sample_rate):
         """
@@ -699,111 +863,6 @@ class SimplifiedLaptopProcessor:
                         speaker_id=segment.speaker_id,
                         is_spoken_to=is_spoken_to
                     )
-
-    def _save_results(self, segments: List[DiarizationResult]):
-        """
-        Save the results to a JSON file.
-        
-        Args:
-            segments: List of DiarizationResult objects
-        """
-        try:
-            # Create a JSON serializable dictionary from each DiarizationResult
-            segments_dict = []
-            for segment in segments:
-                segment_dict = {
-                    "speaker_id": segment.speaker_id,
-                    "start_time": float(segment.start_time),
-                    "end_time": float(segment.end_time),
-                    "transcript": segment.transcript,
-                    "diarization_confidence": float(segment.confidence),
-                    "speaker_confidence": float(segment.speaker_confidence),
-                    "is_spoken_to": bool(segment.is_spoken_to),
-                }
-                if segment.face_angle is not None:
-                    segment_dict["face_angle"] = float(segment.face_angle)
-                if segment.speaker_embedding is not None:
-                    # Convert the embedding to a list if it's not already
-                    if isinstance(segment.speaker_embedding, np.ndarray):
-                        segment_dict["speaker_embedding"] = segment.speaker_embedding.tolist()
-                    else:
-                        segment_dict["speaker_embedding"] = [float(x) for x in segment.speaker_embedding]
-                segments_dict.append(segment_dict)
-            
-            # Count unique speakers
-            unique_speakers = set(segment.speaker_id for segment in segments)
-            num_speakers = len(unique_speakers)
-            
-            # Create conversation data structure
-            conversation_data = {
-                "conversation_id": self.conversation_id,
-                "timestamp": datetime.now().isoformat(),
-                "num_speakers": num_speakers,
-                "speaker_ids": list(unique_speakers),
-                "results": segments_dict
-            }
-            
-            # Save to file
-            output_file = os.path.join(self.output_dir, f"{self.conversation_id}_results.json")
-            with open(output_file, 'w') as f:
-                json.dump(conversation_data, f, indent=2)
-            
-            # Also save to a speaker context JSON for each unique speaker
-            for speaker_id in unique_speakers:
-                # Collect all segments for this speaker
-                speaker_segments = [s for s in segments if s.speaker_id == speaker_id]
-                
-                # Get the speaker context or create a new one
-                speaker_context = self.context_manager.get_speaker(speaker_id)
-                if not speaker_context:
-                    speaker_context = {
-                        "speaker_id": speaker_id,
-                        "interaction_count": 0,
-                        "last_interaction_time": datetime.now().isoformat(),
-                        "common_intents": {},
-                        "average_confidence": 1.0,
-                        "conversation_history": [],
-                        "embedding_index": 0,
-                        "embedding": None,
-                        "spoken_to_count": 0,
-                        "not_spoken_to_count": 0
-                    }
-                
-                # Update speaker context
-                if speaker_segments:
-                    # Use the latest embedding
-                    latest_segment = speaker_segments[-1]
-                    if latest_segment.speaker_embedding is not None:
-                        if isinstance(latest_segment.speaker_embedding, np.ndarray):
-                            speaker_context["embedding"] = [latest_segment.speaker_embedding.tolist()]
-                        else:
-                            speaker_context["embedding"] = [latest_segment.speaker_embedding]
-                    
-                    # Update spoken to counts
-                    spoken_to_segments = [s for s in speaker_segments if s.is_spoken_to]
-                    not_spoken_to_segments = [s for s in speaker_segments if not s.is_spoken_to]
-                    
-                    # Initialize counts if they don't exist
-                    if 'spoken_to_count' not in speaker_context:
-                        speaker_context['spoken_to_count'] = 0
-                    if 'not_spoken_to_count' not in speaker_context:
-                        speaker_context['not_spoken_to_count'] = 0
-                    
-                    speaker_context["spoken_to_count"] += len(spoken_to_segments)
-                    speaker_context["not_spoken_to_count"] += len(not_spoken_to_segments)
-                    
-                    # Save the updated context
-                    self.context_manager.update_speaker(
-                        speaker_id=speaker_id,
-                        embedding=latest_segment.speaker_embedding,
-                        is_spoken_to=latest_segment.is_spoken_to
-                    )
-            
-            logger.info(f"Results saved to {output_file}")
-        except Exception as e:
-            logger.error(f"Error saving results: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
 
 def main():
     """Main function to run the processor."""
