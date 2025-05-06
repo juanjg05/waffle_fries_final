@@ -1,3 +1,7 @@
+**Waffle Fries Final Project FRI I** 
+*Juan Garcia, Archita Singh, Ayah Hassan*
+
+
 What to do? Figure it out. I'm just kidding.
 
 1. Install requirements (venv???):

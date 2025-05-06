@@ -2,16 +2,10 @@ import json
 import os
 from typing import Dict, Optional, List
 from datetime import datetime
-import logging
 from dataclasses import dataclass, asdict
 from collections import defaultdict, deque
 import sqlite3
 import pickle
-import traceback
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 @dataclass
 class SpeakerContext:
@@ -21,17 +15,16 @@ class SpeakerContext:
     common_intents: Dict[str, int] = None
     average_confidence: float = 0.0
     conversation_history: deque = None
-    embedding_index: Optional[int] = None  # Index in the embedding space
-    embedding: Optional[List[float]] = None  # Store the actual embedding
+    embedding_index: Optional[int] = None
+    embedding: Optional[List[float]] = None
     
     def __post_init__(self):
         if self.common_intents is None:
             self.common_intents = defaultdict(int)
         if self.conversation_history is None:
-            self.conversation_history = deque(maxlen=100)  # Increased to 100
+            self.conversation_history = deque(maxlen=100)
     
     def to_dict(self) -> Dict:
-        """Convert to dictionary for storage"""
         return {
             'speaker_id': self.speaker_id,
             'interaction_count': self.interaction_count,
@@ -45,7 +38,6 @@ class SpeakerContext:
     
     @classmethod
     def from_dict(cls, data: Dict) -> 'SpeakerContext':
-        """Create from dictionary"""
         context = cls(speaker_id=data['speaker_id'])
         context.interaction_count = data['interaction_count']
         context.last_interaction_time = (
@@ -65,33 +57,21 @@ class SpeakerContext:
 
 class SpeakerContextManager:
     def __init__(self, storage_dir: str = "data/speaker_contexts"):
-        """
-        Initialize the speaker context manager.
-        
-        Args:
-            storage_dir: Directory to store speaker contexts
-        """
         self.storage_dir = storage_dir
         self.contexts: Dict[str, SpeakerContext] = {}
         self.embedding_index = 0
         
-        # Create storage directory if it doesn't exist
         os.makedirs(storage_dir, exist_ok=True)
         
-        # Initialize SQLite database
         self.db_path = os.path.join(storage_dir, 'speaker_contexts.db')
         self._init_db()
         
-        # Load existing contexts
         self.load_all_contexts()
     
     def _init_db(self):
-        """Initialize SQLite database"""
         with sqlite3.connect(self.db_path) as conn:
-            # Drop existing table if it exists
             conn.execute('DROP TABLE IF EXISTS speaker_contexts')
             
-            # Create new table with updated schema
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS speaker_contexts (
                     speaker_id TEXT PRIMARY KEY,
@@ -107,17 +87,7 @@ class SpeakerContextManager:
             ''')
     
     def get_context(self, speaker_id: str) -> SpeakerContext:
-        """
-        Get or create speaker context.
-        
-        Args:
-            speaker_id: Speaker ID
-            
-        Returns:
-            SpeakerContext object
-        """
         if speaker_id not in self.contexts:
-            # Check if context exists in database
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.execute(
                     'SELECT * FROM speaker_contexts WHERE speaker_id = ?',
@@ -126,7 +96,6 @@ class SpeakerContextManager:
                 row = cursor.fetchone()
                 
                 if row:
-                    # Load from database
                     context = SpeakerContext(
                         speaker_id=row[0],
                         interaction_count=row[1],
@@ -138,7 +107,6 @@ class SpeakerContextManager:
                         embedding=json.loads(row[7]) if row[7] else None
                     )
                 else:
-                    # Create new context
                     context = SpeakerContext(
                         speaker_id=speaker_id,
                         embedding_index=self.embedding_index
@@ -151,12 +119,9 @@ class SpeakerContextManager:
         return self.contexts[speaker_id]
     
     def update_context(self, speaker_id: str, start_time: float, end_time: float, confidence: float, transcript: str = "", embedding: Optional[List[float]] = None, conversation_index: int = 1):
-        """Update speaker context with new interaction"""
         try:
-            # Get existing context or create new one
             context = self.get_context(speaker_id)
             
-            # Update context
             context.interaction_count += 1
             context.last_interaction_time = datetime.now()
             context.average_confidence = (
@@ -164,12 +129,9 @@ class SpeakerContextManager:
                 context.interaction_count
             )
             
-            # Update embedding if provided
             if embedding is not None:
                 context.embedding = embedding
-                logger.info(f"Updated embedding for speaker {speaker_id}")
             
-            # Add to conversation history
             context.conversation_history.append({
                 'conversation_index': conversation_index,
                 'timestamp': context.last_interaction_time.isoformat(),
@@ -179,16 +141,12 @@ class SpeakerContextManager:
                 'transcript': transcript
             })
             
-            # Save to database
             self._save_context(context)
-            logger.info(f"Updated context for speaker {speaker_id} in conversation {conversation_index}")
             
         except Exception as e:
-            logger.error(f"Error updating context: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            print(f"Error updating context: {str(e)}")
     
     def _save_context(self, context: SpeakerContext):
-        """Save context to database"""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute('''
                 INSERT OR REPLACE INTO speaker_contexts
@@ -207,107 +165,103 @@ class SpeakerContextManager:
             ))
     
     def load_all_contexts(self):
-        """Load all contexts from database"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute('SELECT * FROM speaker_contexts')
-            for row in cursor:
-                context = SpeakerContext(
-                    speaker_id=row[0],
-                    interaction_count=row[1],
-                    last_interaction_time=datetime.fromisoformat(row[2]) if row[2] else None,
-                    common_intents=defaultdict(int, json.loads(row[3])),
-                    average_confidence=row[4],
-                    conversation_history=deque(json.loads(row[5]), maxlen=100),
-                    embedding_index=row[6],
-                    embedding=json.loads(row[7]) if row[7] else None
-                )
-                self.contexts[row[0]] = context
-                self.embedding_index = max(self.embedding_index, row[6] + 1)
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute('SELECT * FROM speaker_contexts')
+                for row in cursor.fetchall():
+                    context = SpeakerContext(
+                        speaker_id=row[0],
+                        interaction_count=row[1],
+                        last_interaction_time=datetime.fromisoformat(row[2]) if row[2] else None,
+                        common_intents=defaultdict(int, json.loads(row[3])),
+                        average_confidence=row[4],
+                        conversation_history=deque(json.loads(row[5]), maxlen=100),
+                        embedding_index=row[6],
+                        embedding=json.loads(row[7]) if row[7] else None
+                    )
+                    self.contexts[context.speaker_id] = context
+                    
+                    if context.embedding_index is not None and context.embedding_index >= self.embedding_index:
+                        self.embedding_index = context.embedding_index + 1
+        except Exception as e:
+            print(f"Error loading contexts: {str(e)}")
     
     def get_speaker_history(self, speaker_id: str) -> List[Dict]:
-        """Get interaction history for a speaker"""
         context = self.get_context(speaker_id)
         return list(context.conversation_history)
     
     def get_speaker_stats(self, speaker_id: str) -> Dict:
-        """Get statistics for a speaker"""
         context = self.get_context(speaker_id)
         return {
+            'speaker_id': context.speaker_id,
             'interaction_count': context.interaction_count,
             'last_interaction': context.last_interaction_time.isoformat() if context.last_interaction_time else None,
-            'common_intents': dict(context.common_intents),
             'average_confidence': context.average_confidence,
-            'embedding_index': context.embedding_index
+            'history_count': len(context.conversation_history)
         }
     
     def get_all_speakers(self) -> List[Dict]:
-        """Get information about all speakers"""
-        return [
-            {
+        speakers = []
+        for speaker_id, context in self.contexts.items():
+            speakers.append({
                 'speaker_id': speaker_id,
-                **self.get_speaker_stats(speaker_id)
-            }
-            for speaker_id in self.contexts
-        ]
+                'interaction_count': context.interaction_count,
+                'last_interaction': context.last_interaction_time.isoformat() if context.last_interaction_time else None,
+                'embedding': context.embedding
+            })
+        return speakers
     
-    def export_contexts(self, filepath: str):
-        """
-        Export all speaker contexts to a JSON file.
-        
-        Args:
-            filepath: Path to save the JSON file
-        """
+    def save_to_file(self, filepath: str):
         try:
-            # Convert all contexts to dictionaries
-            contexts_data = {
-                speaker_id: context.to_dict()
-                for speaker_id, context in self.contexts.items()
-            }
+            contexts_data = {}
+            for speaker_id, context in self.contexts.items():
+                contexts_data[speaker_id] = context.to_dict()
             
-            # Save to JSON file
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            
             with open(filepath, 'w') as f:
                 json.dump(contexts_data, f, indent=2)
             
-            logger.info(f"Exported {len(contexts_data)} speaker contexts to {filepath}")
-            
+            print(f"Exported {len(contexts_data)} contexts to {filepath}")
         except Exception as e:
-            logger.error(f"Error exporting contexts: {str(e)}")
-            raise
-
-    def import_contexts(self, filepath: str):
-        """
-        Import speaker contexts from a JSON file.
-        
-        Args:
-            filepath: Path to the JSON file
-        """
+            print(f"Error exporting contexts: {str(e)}")
+    
+    def load_from_file(self, filepath: str):
         try:
-            # Load from JSON file
             with open(filepath, 'r') as f:
                 contexts_data = json.load(f)
             
-            # Convert to SpeakerContext objects
-            for speaker_id, data in contexts_data.items():
-                context = SpeakerContext.from_dict(data)
+            for speaker_id, context_data in contexts_data.items():
+                context = SpeakerContext.from_dict(context_data)
                 self.contexts[speaker_id] = context
-                self.embedding_index = max(self.embedding_index, context.embedding_index + 1)
+                
+                if context.embedding_index is not None and context.embedding_index >= self.embedding_index:
+                    self.embedding_index = context.embedding_index + 1
             
-            # Save to database
-            for context in self.contexts.values():
-                self._save_context(context)
+            print(f"Imported {len(contexts_data)} contexts from {filepath}")
             
-            logger.info(f"Imported {len(contexts_data)} speaker contexts from {filepath}")
-            
+            self._save_all_contexts()
         except Exception as e:
-            logger.error(f"Error importing contexts: {str(e)}")
-            raise
+            print(f"Error importing contexts: {str(e)}")
+    
+    def _save_all_contexts(self):
+        with sqlite3.connect(self.db_path) as conn:
+            for speaker_id, context in self.contexts.items():
+                self._save_context(context)
+    
+    def add_speech_segment(self, speaker_id: str, transcript: str, start_time: float, end_time: float, embedding: Optional[List[float]] = None, confidence: float = 1.0):
+        self.update_context(
+            speaker_id=speaker_id,
+            start_time=start_time,
+            end_time=end_time,
+            confidence=confidence,
+            transcript=transcript,
+            embedding=embedding
+        )
 
-# Example usage:
 if __name__ == "__main__":
-    # Initialize context manager
     manager = SpeakerContextManager()
     
-    # Update context for a speaker
     manager.update_context(
         speaker_id="SPEAKER_1",
         start_time=0.0,
@@ -316,13 +270,10 @@ if __name__ == "__main__":
         transcript="Hey robot, how are you?"
     )
     
-    # Get speaker history
     history = manager.get_speaker_history("SPEAKER_1")
     print(f"Speaker 1 history: {history}")
     
-    # Get speaker stats
     stats = manager.get_speaker_stats("SPEAKER_1")
     print(f"Speaker 1 stats: {stats}")
     
-    # Export contexts
-    manager.export_contexts("speaker_contexts.json") 
+    manager.save_to_file("speaker_contexts.json") 
