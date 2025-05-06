@@ -1,0 +1,10 @@
+2025-05-05T22:28:30.556772 (0.0 - 3.0): Hey, how was your day to day?
+2025-05-05T22:28:30.573213 (3.0 - 6.0): It was pretty good. How about you?
+2025-05-05T22:28:30.585206 (6.0 - 9.0): Pretty good. I had some chickful either day.
+2025-05-05T22:28:30.615870 (12.0 - 15.0): Yeah, it was. Alright, bye.
+2025-05-05T22:28:30.628364 (15.0 - 17.0): Bye.
+2025-05-05T22:34:34.984815 (4.0 - 6.0): Good, how are you?
+2025-05-05T22:34:35.013911 (23.0 - 27.0): That is a very weather dependent activity.
+2025-05-05T22:34:35.017914 (27.0 - 33.0): You're right, I guess I won't run, I guess I'll just stay fat forever.
+2025-05-05T22:56:37.059771 (8.0 - 13.0): I'm doing excellent. How is the weather today?
+2025-05-05T22:56:37.085484 (23.0 - 27.0): What else did you have for dinner?

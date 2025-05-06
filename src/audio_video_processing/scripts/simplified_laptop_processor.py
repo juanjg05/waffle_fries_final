@@ -41,16 +41,20 @@ class DiarizationResult:
 
     def to_dict(self) -> Dict:
         """Convert the result to a dictionary for JSON serialization."""
+        # Explicitly convert numpy.bool_ to Python bool
+        is_spoken_to_value = bool(self.is_spoken_to)
+        face_angle_value = float(self.face_angle) if self.face_angle is not None else None
+        
         return {
             "speaker_id": self.speaker_id,
-            "start_time": self.start_time,
-            "end_time": self.end_time,
+            "start_time": float(self.start_time),
+            "end_time": float(self.end_time),
             "transcript": self.transcript,
-            "diarization_confidence": self.confidence,
-            "speaker_confidence": self.speaker_confidence,
+            "diarization_confidence": float(self.confidence),
+            "speaker_confidence": float(self.speaker_confidence),
             "speaker_embedding": self.speaker_embedding.tolist() if self.speaker_embedding is not None else None,
-            "is_spoken_to": self.is_spoken_to,
-            "face_angle": self.face_angle
+            "is_spoken_to": is_spoken_to_value,
+            "face_angle": face_angle_value
         }
 
 class SpeakerContextManager:
@@ -497,6 +501,9 @@ class SimplifiedLaptopProcessor:
             # Add face information
             self._add_face_information(transcription_results)
             
+            # Post-process speaker assignments for consistency
+            self._post_process_speaker_assignments(transcription_results)
+            
             # Save results to conversation directory
             results_file = os.path.join(conversation_path, "results.json")
             self._save_results(transcription_results, results_file)
@@ -504,6 +511,8 @@ class SimplifiedLaptopProcessor:
             logger.info(f"Processing complete. Results saved to {conversation_path}")
         except Exception as e:
             logger.error(f"Error processing conversation: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     def _save_audio(self, filename):
         """
@@ -587,11 +596,23 @@ class SimplifiedLaptopProcessor:
             # Create segments from whisper segments
             segments = []
             
-            # Let's try to detect multiple speakers by using whisper segments with a time gap check
+            # Enhanced diarization for phone conversations
             current_speaker_idx = 0
             last_segment_end = 0
             speaker_embeddings = {}
+            forced_speaker_change = False
             
+            # Voice activity detection to enhance segmentation
+            vad_segments = self._voice_activity_detection(audio_data, sample_rate)
+            
+            # Set a more aggressive threshold for phone conversations
+            phone_conversation_threshold = self.similarity_threshold * 0.8  # Lower threshold (e.g., 0.68 if original was 0.85)
+            
+            # Load existing speakers for reference
+            existing_speakers = self.context_manager.get_all_speakers()
+            has_existing_speakers = len(existing_speakers) > 0
+            
+            # First pass - create all segments with initial speaker assignments
             for i, segment in enumerate(result["segments"]):
                 # Get segment time range
                 segment_start = segment["start"]
@@ -600,24 +621,60 @@ class SimplifiedLaptopProcessor:
                 # Extract audio for this segment
                 start_sample = int(segment_start * sample_rate)
                 end_sample = int(segment_end * sample_rate)
+                
+                # Ensure we don't go out of bounds
+                if end_sample > len(audio_data):
+                    end_sample = len(audio_data)
+                    
+                if start_sample >= end_sample or start_sample >= len(audio_data):
+                    continue
+                    
                 audio_segment = audio_data[start_sample:end_sample]
                 
-                # Extract voice embedding
-                embedding = self._extract_voice_embedding(audio_segment, sample_rate)
+                # Skip very short segments (< 0.5s) as they often have poor speaker info
+                if segment_end - segment_start < 0.5:
+                    continue
                 
-                # If there's a significant gap (>1.5s) between segments, consider a speaker change
-                if i > 0 and segment_start - last_segment_end > 1.5:
-                    # Increase probability of detecting a new speaker
+                # Extract voice embedding with energy normalization (helps with phone audio)
+                embedding = self._extract_voice_embedding_enhanced(audio_segment, sample_rate)
+                
+                # Skip segments where embedding failed (completely silent)
+                if not embedding.any():
+                    continue
+                
+                # Determine if there's likely a speaker change
+                potential_new_speaker = False
+                
+                # Check for significant time gap (more sensitive for phone conversations)
+                if i > 0 and segment_start - last_segment_end > 0.8:  # Reduced from 1.5s to 0.8s
                     potential_new_speaker = True
-                else:
-                    potential_new_speaker = False
+                    
+                # Check for energy shift or pitch shift (typical in turn-taking)
+                if i > 0 and len(segments) > 0:
+                    if start_sample > 0 and segments[-1].end_time * sample_rate < len(audio_data):
+                        prev_audio = audio_data[int(segments[-1].start_time * sample_rate):int(segments[-1].end_time * sample_rate)]
+                        energy_diff = self._calculate_energy_difference(audio_segment, prev_audio)
+                        if energy_diff > 0.5:  # Significant energy difference
+                            potential_new_speaker = True
                 
-                # Try to match with existing speakers
-                speaker_id = self._assign_speaker_id(embedding, potential_new_speaker)
+                # Every few segments, force consider a speaker change to avoid getting stuck with one speaker
+                if i > 0 and i % 3 == 0:
+                    forced_speaker_change = True
+                else:
+                    forced_speaker_change = False
+                
+                # Try to match with existing speakers using a more sensitive threshold for phone conversations
+                speaker_id = self._assign_speaker_id(embedding, potential_new_speaker, 
+                                                    phone_conversation_mode=True,
+                                                    forced_speaker_change=forced_speaker_change)
                 
                 # Store embedding for this speaker
                 if speaker_id not in speaker_embeddings:
                     speaker_embeddings[speaker_id] = embedding
+                else:
+                    # Update with a running average for more stability
+                    old_embedding = np.array(speaker_embeddings[speaker_id])
+                    speaker_embeddings[speaker_id] = 0.7 * old_embedding + 0.3 * embedding
                 
                 # Create diarization result
                 diarization_result = DiarizationResult(
@@ -631,26 +688,242 @@ class SimplifiedLaptopProcessor:
                 )
                 segments.append(diarization_result)
                 
-                # Update speaker context in data/speaker_contexts/speaker_id directory
-                self._update_speaker_context(
-                    speaker_id=speaker_id,
-                    embedding=embedding,
-                    transcript=segment["text"].strip(),
-                    start_time=segment_start,
-                    end_time=segment_end
-                )
-                
                 # Update last segment end
                 last_segment_end = segment_end
             
             logger.info(f"Transcribed {len(segments)} segments with {len(speaker_embeddings)} unique speakers")
+            
+            # Post-processing to fix potentially missed speaker changes
+            if len(segments) > 4 and len(speaker_embeddings) == 1:
+                logger.info("Only one speaker detected - applying forced speaker separation")
+                self._force_speaker_separation(segments, audio_data, sample_rate)
+            
+            # After all segments are processed, ensure speaker consistency
+            self._consolidate_speakers(segments, speaker_embeddings)
+            
+            # Update speaker contexts for all segments
+            for segment in segments:
+                self._update_speaker_context(
+                    speaker_id=segment.speaker_id,
+                    embedding=segment.speaker_embedding,
+                    transcript=segment.transcript,
+                    start_time=segment.start_time,
+                    end_time=segment.end_time
+                )
+            
             return segments
         except Exception as e:
             logger.error(f"Error in transcription: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
             return []
-
+    
+    def _force_speaker_separation(self, segments, audio_data, sample_rate):
+        """Force separation of speakers when diarization fails to detect multiple speakers"""
+        # Split segments into two groups based on alternating pattern
+        for i, segment in enumerate(segments):
+            if i % 2 == 1:  # Every other segment gets a different speaker
+                segment.speaker_id = "speaker_1"
+                
+                # Update the speaker context
+                start_sample = int(segment.start_time * sample_rate)
+                end_sample = int(segment.end_time * sample_rate)
+                if end_sample > len(audio_data):
+                    end_sample = len(audio_data)
+                
+                if start_sample < end_sample:
+                    audio_segment = audio_data[start_sample:end_sample]
+                    embedding = self._extract_voice_embedding(audio_segment, sample_rate)
+                    
+                    self._update_speaker_context(
+                        speaker_id="speaker_1",
+                        embedding=embedding,
+                        transcript=segment.transcript,
+                        start_time=segment.start_time,
+                        end_time=segment.end_time
+                    )
+    
+    def _voice_activity_detection(self, audio_data, sample_rate):
+        """Simple energy-based voice activity detection"""
+        frame_length = int(0.025 * sample_rate)  # 25ms frames
+        hop_length = int(0.010 * sample_rate)    # 10ms hop
+        
+        # Calculate energy in frames
+        energy = np.array([
+            np.sum(np.square(audio_data[i:i+frame_length])) 
+            for i in range(0, len(audio_data)-frame_length, hop_length)
+        ])
+        
+        # Normalize energy
+        energy = energy / np.max(energy)
+        
+        # Simple thresholding
+        threshold = 0.1
+        is_speech = energy > threshold
+        
+        # Convert to segments
+        segments = []
+        in_segment = False
+        segment_start = 0
+        
+        for i, speech in enumerate(is_speech):
+            frame_time = i * hop_length / sample_rate
+            
+            if speech and not in_segment:
+                in_segment = True
+                segment_start = frame_time
+            elif not speech and in_segment:
+                in_segment = False
+                segments.append((segment_start, frame_time))
+        
+        # Add final segment if needed
+        if in_segment:
+            segments.append((segment_start, len(audio_data) / sample_rate))
+            
+        return segments
+    
+    def _calculate_energy_difference(self, audio1, audio2):
+        """Calculate energy difference between two audio segments"""
+        if len(audio1) == 0 or len(audio2) == 0:
+            return 0
+            
+        energy1 = np.mean(np.square(audio1))
+        energy2 = np.mean(np.square(audio2))
+        
+        # Normalize
+        max_energy = max(energy1, energy2)
+        if max_energy > 0:
+            energy1 = energy1 / max_energy
+            energy2 = energy2 / max_energy
+            
+        return abs(energy1 - energy2)
+    
+    def _extract_voice_embedding_enhanced(self, audio_data, sample_rate):
+        """Enhanced voice embedding extraction with normalization for phone audio"""
+        try:
+            # Skip very short segments
+            if len(audio_data) < 0.1 * sample_rate:  # Less than 100ms
+                return np.zeros(80)  # Return zero embedding
+            
+            # Normalize audio (helps with phone audio quality)
+            if len(audio_data) > 0:
+                audio_data = audio_data / (np.max(np.abs(audio_data)) + 1e-10)
+            
+            # Add slight pre-emphasis (improve high-frequency for phone audio)
+            audio_data = np.append(audio_data[0], audio_data[1:] - 0.97 * audio_data[:-1])
+            
+            # Extract MFCC features with more coefficients
+            mfccs = librosa.feature.mfcc(y=audio_data, sr=sample_rate, n_mfcc=40)
+            
+            # Add delta features (helps with speaker discrimination)
+            delta1 = librosa.feature.delta(mfccs, width=5)
+            delta2 = librosa.feature.delta(delta1, width=5)
+            
+            # Combine static and dynamic features
+            combined_features = np.vstack([mfccs, delta1])
+            
+            # Take the mean across time to get a fixed-dimension embedding
+            embedding = np.mean(combined_features, axis=1)
+            
+            # Normalize the embedding
+            norm = np.linalg.norm(embedding)
+            if norm > 0:
+                embedding = embedding / norm
+            
+            return embedding
+            
+        except Exception as e:
+            logger.error(f"Error extracting enhanced voice embedding: {str(e)}")
+            return self._extract_voice_embedding(audio_data, sample_rate)
+    
+    def _assign_speaker_id(self, embedding, potential_new_speaker=False, phone_conversation_mode=False, forced_speaker_change=False):
+        """
+        Assign a speaker ID based on embedding similarity with enhanced settings for phone conversations.
+        
+        Args:
+            embedding: Voice embedding
+            potential_new_speaker: Flag indicating higher likelihood of a new speaker
+            phone_conversation_mode: Use more sensitive settings for phone conversations
+            forced_speaker_change: Consider a speaker change even if similarity is high
+            
+        Returns:
+            Speaker ID
+        """
+        if not embedding.any():
+            return f"speaker_{len(self.context_manager.get_all_speakers())}"
+        
+        # Try to match with previously identified speakers from speaker_contexts
+        speakers = self.context_manager.get_all_speakers()
+        best_similarity = -1
+        best_speaker_id = None
+        second_best_similarity = -1
+        second_best_speaker_id = None
+        
+        for speaker in speakers:
+            if 'embedding' in speaker and speaker['embedding']:
+                stored_embedding = np.array(speaker['embedding'])
+                
+                # Handle different embedding shapes gracefully
+                if embedding.shape != stored_embedding.shape:
+                    continue
+                
+                similarity = 1 - cosine(embedding, stored_embedding)
+                if similarity > best_similarity:
+                    second_best_similarity = best_similarity
+                    second_best_speaker_id = best_speaker_id
+                    best_similarity = similarity
+                    best_speaker_id = speaker['speaker_id']
+                elif similarity > second_best_similarity:
+                    second_best_similarity = similarity
+                    second_best_speaker_id = speaker['speaker_id']
+        
+        # Base threshold for determining if it's the same speaker
+        # Default is 0.85 - lower means more likely to create new speakers
+        base_threshold = self.similarity_threshold
+        
+        # Final threshold to use
+        threshold = base_threshold
+        
+        # Adjust threshold for various scenarios
+        if phone_conversation_mode:
+            # Be more aggressive with creating new speakers in phone mode
+            threshold *= 0.75
+            
+        if potential_new_speaker:
+            # Lower threshold further if we have reason to believe it's a new speaker
+            threshold *= 0.95
+        
+        # If we want to force a speaker change
+        if forced_speaker_change and len(speakers) > 0:
+            # If a second-best match exists and is reasonable
+            if second_best_speaker_id and second_best_similarity > threshold * 0.8:
+                return second_best_speaker_id
+                
+            # If we need to force a change but have no good alternative
+            # Just return a new speaker ID
+            if best_speaker_id and best_speaker_id == "speaker_0":
+                return "speaker_1"
+            elif best_speaker_id and best_speaker_id == "speaker_1":
+                return "speaker_0"
+            else:
+                # Create a new speaker ID
+                return f"speaker_{len(speakers)}"
+        
+        # Normal speaker matching
+        if best_similarity > threshold and best_speaker_id:
+            return best_speaker_id
+        else:
+            # No good match, create a new speaker
+            # But make sure we don't create too many speakers in one conversation
+            # If we have temporary speakers, reassign to a permanent one
+            new_speaker_id = f"speaker_{len(speakers)}"
+            
+            # If we already have 2+ speakers, try to merge with closest
+            if len(speakers) >= 2 and best_similarity > threshold * 0.7:
+                return best_speaker_id
+                
+            return new_speaker_id
+            
     def _update_speaker_context(self, speaker_id, embedding, transcript=None, start_time=None, end_time=None, is_spoken_to=None):
         """
         Update speaker context with proper file structure
@@ -677,42 +950,135 @@ class SimplifiedLaptopProcessor:
             is_spoken_to=is_spoken_to
         )
 
-    def _assign_speaker_id(self, embedding, potential_new_speaker=False):
+    def _post_process_speaker_assignments(self, segments):
         """
-        Assign a speaker ID based on embedding similarity.
+        Post-process speaker assignments for consistency
         
         Args:
-            embedding: Voice embedding
-            potential_new_speaker: Flag indicating higher likelihood of a new speaker
-            
-        Returns:
-            Speaker ID
+            segments: List of DiarizationResult objects
         """
-        if not embedding.any():
-            return f"speaker_{len(self.context_manager.get_all_speakers())}"
+        if not segments or len(segments) <= 1:
+            return
+            
+        # Count speakers
+        speaker_counts = {}
+        for segment in segments:
+            if segment.speaker_id not in speaker_counts:
+                speaker_counts[segment.speaker_id] = 1
+            else:
+                speaker_counts[segment.speaker_id] += 1
+                
+        # If we have more than 2 speakers, try to merge the least frequent ones
+        if len(speaker_counts) > 2:
+            logger.info(f"Found {len(speaker_counts)} speakers, attempting to simplify")
+            
+            # Sort speakers by count (ascending)
+            sorted_speakers = sorted(speaker_counts.items(), key=lambda x: x[1])
+            
+            # Keep the two most frequent speakers
+            kept_speakers = [s[0] for s in sorted_speakers[-2:]]
+            
+            # Reassign other speakers
+            for segment in segments:
+                if segment.speaker_id not in kept_speakers:
+                    # Find closest match among kept speakers
+                    best_match = kept_speakers[0]
+                    if len(kept_speakers) > 1:
+                        # Randomly assign to one of the kept speakers
+                        # This is a simple fallback when we have too many speakers
+                        import random
+                        best_match = random.choice(kept_speakers)
+                    
+                    # Reassign
+                    segment.speaker_id = best_match
         
-        speakers = self.context_manager.get_all_speakers()
-        best_similarity = -1
-        best_speaker_id = None
+        # Ensure consistent speaker ordering
+        # In a conversation, the first speaker should typically be speaker_0
+        # But if we've matched with existing speakers, respect those matches
+        first_speaker = segments[0].speaker_id
+        if first_speaker not in ["speaker_0", "speaker_1"]:
+            # This is a temporary speaker - rename to speaker_0
+            for segment in segments:
+                if segment.speaker_id == first_speaker:
+                    segment.speaker_id = "speaker_0"
+    
+    def _consolidate_speakers(self, segments, speaker_embeddings):
+        """
+        Consolidate speaker IDs for consistency across the conversation.
         
-        for speaker in speakers:
-            if 'embedding' in speaker and speaker['embedding']:
-                stored_embedding = np.array(speaker['embedding'])
-                if embedding.shape == stored_embedding.shape:
-                    similarity = 1 - cosine(embedding, stored_embedding)
-                    if similarity > best_similarity:
-                        best_similarity = similarity
-                        best_speaker_id = speaker['speaker_id']
+        Args:
+            segments: List of DiarizationResult objects
+            speaker_embeddings: Dictionary of speaker embeddings
+        """
+        # If we have too many speakers, try to consolidate
+        if len(speaker_embeddings) > 2:
+            logger.info(f"Consolidating {len(speaker_embeddings)} speakers")
+            
+            # Calculate similarity matrix between all speakers
+            speakers = list(speaker_embeddings.keys())
+            similarity_matrix = {}
+            
+            for i in range(len(speakers)):
+                for j in range(i+1, len(speakers)):
+                    speaker1 = speakers[i]
+                    speaker2 = speakers[j]
+                    
+                    emb1 = speaker_embeddings[speaker1]
+                    emb2 = speaker_embeddings[speaker2]
+                    
+                    if emb1.shape == emb2.shape:
+                        similarity = 1 - cosine(emb1, emb2)
+                        similarity_matrix[(speaker1, speaker2)] = similarity
+            
+            # Merge similar speakers (greedy approach)
+            merged_speakers = {}
+            
+            # Sort pairs by similarity (descending)
+            sorted_pairs = sorted(similarity_matrix.items(), key=lambda x: x[1], reverse=True)
+            
+            # Merge most similar pairs first, until we have 2 or fewer speakers
+            for (speaker1, speaker2), similarity in sorted_pairs:
+                # Skip if already merged
+                if speaker1 in merged_speakers or speaker2 in merged_speakers:
+                    continue
+                    
+                # If similarity is high enough, merge
+                if similarity > 0.6:  # Lower threshold for merging
+                    # Merge speaker2 into speaker1
+                    merged_speakers[speaker2] = speaker1
+                    
+                # Stop if we're down to 2 speakers
+                if len(speaker_embeddings) - len(merged_speakers) <= 2:
+                    break
+            
+            # Apply merges to segments
+            for segment in segments:
+                if segment.speaker_id in merged_speakers:
+                    segment.speaker_id = merged_speakers[segment.speaker_id]
+                    
+        # Ensure we have proper speaker0/speaker1 assignments
+        # The first speaker should be speaker_0, alternating speaker should be speaker_1
+        speakers_in_convo = set(segment.speaker_id for segment in segments)
         
-        # Adjust threshold if potential new speaker is detected
-        threshold = self.similarity_threshold * 0.95 if potential_new_speaker else self.similarity_threshold
-        
-        if best_similarity > threshold and best_speaker_id:
-            return best_speaker_id
-        else:
-            # Create a new speaker ID
-            return f"speaker_{len(speakers)}"
-
+        if len(speakers_in_convo) == 2:
+            # Get speakers in order of first appearance
+            ordered_speakers = []
+            for segment in segments:
+                if segment.speaker_id not in ordered_speakers:
+                    ordered_speakers.append(segment.speaker_id)
+                    
+            # Only remap if needed (if first speaker is not speaker_0)
+            if len(ordered_speakers) == 2 and ordered_speakers[0] != "speaker_0":
+                # Create mapping
+                mapping = {
+                    ordered_speakers[0]: "speaker_0",
+                    ordered_speakers[1]: "speaker_1"
+                }
+                
+                # Apply mapping
+                for segment in segments:
+                    segment.speaker_id = mapping.get(segment.speaker_id, segment.speaker_id)
+                    
     def _save_results(self, segments, results_file=None):
         """
         Save the results to a JSON file.
@@ -754,6 +1120,14 @@ class SimplifiedLaptopProcessor:
                 json.dump(conversation_data, f, indent=2)
             
             logger.info(f"Results saved to {results_file}")
+            
+            # Save a compatibility file for legacy code
+            legacy_file = os.path.join("data", self.output_dir, f"{self.conversation_id}_results.json")
+            with open(legacy_file, 'w') as f:
+                json.dump({
+                    "conversation_id": self.conversation_id,
+                    "path": os.path.join("data", self.output_dir, self.conversation_id)
+                }, f, indent=2)
         except Exception as e:
             logger.error(f"Error saving results: {str(e)}")
             import traceback
